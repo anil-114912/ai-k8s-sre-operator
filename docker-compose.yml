@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-k8s-sre-operator:latest
+    container_name: sre-operator-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DEMO_MODE=1
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=sqlite:////data/sre_operator.db
+      - OPERATOR_DRY_RUN=true
+      - AUTO_FIX_ENABLED=false
+    env_file:
+      - .env
+    volumes:
+      - sre-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-k8s-sre-operator:latest
+    container_name: sre-operator-ui
+    command: streamlit run ui/streamlit_app.py --server.port=8501 --server.address=0.0.0.0
+    ports:
+      - "8501:8501"
+    environment:
+      - DEMO_MODE=1
+      - API_BASE_URL=http://api:8000
+    env_file:
+      - .env
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  sre-data:
+    driver: local

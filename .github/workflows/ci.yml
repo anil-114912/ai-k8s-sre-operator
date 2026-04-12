@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install ruff
+      - run: ruff check . --output-format=github
+      - run: ruff format --check .
+
+  test:
+    name: Tests (pytest)
+    runs-on: ubuntu-latest
+    env:
+      DEMO_MODE: "1"
+      DATABASE_URL: "sqlite:///./test_sre.db"
+      LOG_LEVEL: "WARNING"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Run tests
+        run: python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: htmlcov/
+
+  smoke:
+    name: Smoke test (imports)
+    runs-on: ubuntu-latest
+    env:
+      DEMO_MODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Test API imports
+        run: python3 -c "from api.main import app; print('API OK')"
+      - name: Test detectors
+        run: python3 -c "from detectors.crashloop_detector import CrashLoopDetector; print('Detectors OK')"
+      - name: Test models
+        run: python3 -c "from models.incident import Incident; from models.remediation import RemediationPlan; print('Models OK')"
+      - name: Test AI
+        run: python3 -c "from ai.llm import get_llm_client; c = get_llm_client(); print('LLM OK')"
+
+  helm-lint:
+    name: Helm lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+      - name: Lint Helm chart
+        run: helm lint helm/ai-k8s-sre-operator

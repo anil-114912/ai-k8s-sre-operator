@@ -1,0 +1,149 @@
+- id: eks-001
+  title: "EKS node group capacity insufficient"
+  scope: cluster
+  symptoms:
+    - "Node group cannot scale up"
+    - "EC2 InsufficientInstanceCapacity error"
+    - "Pods stuck Pending due to no nodes"
+    - "Auto Scaling Group at max capacity"
+  event_patterns:
+    - "InsufficientInstanceCapacity"
+    - "node group"
+    - "autoscaling"
+    - "EC2"
+  log_patterns:
+    - "InsufficientInstanceCapacity"
+    - "capacity not available"
+    - "no capacity"
+    - "autoscaler"
+  metric_patterns:
+    - "cluster_autoscaler_unschedulable_pods_count > 0"
+  root_cause: "The EKS managed node group cannot provision new EC2 instances because the requested instance type has insufficient capacity in the target Availability Zone"
+  remediation_steps:
+    - "Check cluster-autoscaler logs: kubectl logs -n kube-system -l app=cluster-autoscaler"
+    - "Add additional instance types to the node group via AWS Console or eksctl"
+    - "Enable Capacity Rebalancing or Spot instance fallback in the Auto Scaling Group"
+    - "Expand to additional Availability Zones in the node group"
+    - "eksctl create nodegroup --cluster <name> --instance-types m5.xlarge,m5a.xlarge,m4.xlarge --spot"
+    - "Alternatively scale existing nodes vertically (larger instance type)"
+  confidence_hints:
+    - pattern: "InsufficientInstanceCapacity"
+      boost: 0.45
+    - pattern: "node group"
+      boost: 0.2
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [eks, aws, node-group, capacity, autoscaler, ec2]
+  provider: aws
+
+- id: eks-002
+  title: "EKS IAM IRSA (pod identity) missing or misconfigured"
+  scope: pod
+  symptoms:
+    - "AccessDenied from AWS API calls in pod logs"
+    - "No credentials found"
+    - "IRSA annotation missing on ServiceAccount"
+  event_patterns:
+    - "AccessDenied"
+    - "iam"
+    - "credentials"
+  log_patterns:
+    - "AccessDenied"
+    - "no credentials"
+    - "unable to assume role"
+    - "ExpiredToken"
+    - "InvalidClientTokenId"
+    - "sts"
+    - "iam"
+  metric_patterns: []
+  root_cause: "The pod is making AWS API calls but the IAM Role for Service Account (IRSA) is not configured — either the ServiceAccount lacks the eks.amazonaws.com/role-arn annotation or the IAM role trust policy is wrong"
+  remediation_steps:
+    - "Check ServiceAccount annotation: kubectl get sa <name> -n <namespace> -o yaml | grep role-arn"
+    - "Add IRSA annotation: kubectl annotate sa <name> -n <namespace> eks.amazonaws.com/role-arn=arn:aws:iam::<account>:role/<role-name>"
+    - "Verify IAM role trust policy allows sts:AssumeRoleWithWebIdentity from EKS OIDC provider"
+    - "Check OIDC provider is configured for cluster: aws eks describe-cluster --name <cluster> | grep oidc"
+    - "Restart pods to pick up new annotation: kubectl rollout restart deployment/<name> -n <namespace>"
+  confidence_hints:
+    - pattern: "AccessDenied"
+      boost: 0.3
+    - pattern: "unable to assume role"
+      boost: 0.4
+    - pattern: "irsa"
+      boost: 0.4
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [eks, aws, irsa, iam, serviceaccount, permissions]
+  provider: aws
+
+- id: eks-003
+  title: "EKS ENI limit exhaustion"
+  scope: cluster
+  symptoms:
+    - "No more IPs available on node"
+    - "aws-node CNI shows IP exhaustion"
+    - "Pods in Pending with IP allocation error"
+  event_patterns:
+    - "ENI limit"
+    - "insufficient IPs"
+    - "vpc-cni"
+    - "aws-node"
+  log_patterns:
+    - "eni limit"
+    - "ip exhausted"
+    - "insufficient ips"
+    - "no available addresses"
+    - "vpc-cni"
+  metric_patterns:
+    - "aws_eks_pod_ip_pool_available == 0"
+  root_cause: "The AWS VPC CNI plugin has exhausted the Elastic Network Interface (ENI) and IP address limits for the EC2 instance type — the number of pods per node exceeds the ENI IP limit"
+  remediation_steps:
+    - "Check aws-node DaemonSet logs: kubectl logs -n kube-system -l k8s-app=aws-node"
+    - "View IP pool status: kubectl describe node <name> | grep pods"
+    - "Enable prefix assignment mode for more IPs: aws eks update-addon --cluster-name <cluster> --addon-name vpc-cni --configuration-values '{\"env\":{\"ENABLE_PREFIX_DELEGATION\":\"true\"}}'"
+    - "Add nodes with larger instance types (more ENIs/IPs)"
+    - "Distribute pods across more nodes to avoid per-node limits"
+    - "Check instance type limits: https://github.com/awslabs/amazon-eks-ami/blob/master/files/eni-max-pods.txt"
+  confidence_hints:
+    - pattern: "eni limit"
+      boost: 0.45
+    - pattern: "vpc-cni"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [eks, aws, eni, vpc-cni, ip-exhaustion, networking]
+  provider: aws
+
+- id: eks-004
+  title: "EKS add-on version incompatible"
+  scope: cluster
+  symptoms:
+    - "EKS add-on stuck in DEGRADED state"
+    - "Add-on version conflicts with cluster version"
+    - "coredns/vpc-cni/kube-proxy version mismatch"
+  event_patterns:
+    - "addon"
+    - "version incompatible"
+    - "DEGRADED"
+    - "conflict"
+  log_patterns:
+    - "addon version"
+    - "incompatible"
+    - "conflict"
+    - "unsupported kubernetes version"
+  metric_patterns: []
+  root_cause: "An EKS managed add-on (CoreDNS, vpc-cni, kube-proxy, or EBS CSI driver) is running a version that is incompatible with the current Kubernetes cluster version after an upgrade"
+  remediation_steps:
+    - "List add-on status: aws eks list-addons --cluster-name <cluster>"
+    - "Check add-on details: aws eks describe-addon --cluster-name <cluster> --addon-name <name>"
+    - "Get recommended version: aws eks describe-addon-versions --cluster-name <cluster> --addon-name <name>"
+    - "Update add-on to compatible version: aws eks update-addon --cluster-name <cluster> --addon-name <name> --addon-version <version>"
+    - "Verify add-on is ACTIVE: aws eks describe-addon --cluster-name <cluster> --addon-name <name> | grep status"
+  confidence_hints:
+    - pattern: "addon version"
+      boost: 0.35
+    - pattern: "DEGRADED"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [eks, aws, addon, version, coredns, vpc-cni, upgrade]
+  provider: aws

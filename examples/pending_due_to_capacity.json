@@ -1,0 +1,49 @@
+{
+  "id": "inc-003",
+  "title": "PodPending: data-pipeline cannot be scheduled (insufficient memory)",
+  "incident_type": "PodPending",
+  "severity": "high",
+  "namespace": "production",
+  "workload": "data-pipeline",
+  "pod_name": "data-pipeline-6c9f-qrstu",
+  "container_name": "data-pipeline",
+  "provider_used": "simulation",
+  "raw_signals": {
+    "phase": "Pending",
+    "pending_seconds": 900,
+    "scheduling_reasons": [
+      "0/3 nodes are available: 3 Insufficient memory. preemption: 0/3 nodes are available: 3 No preemption victims found for incoming pod."
+    ],
+    "events": [
+      {
+        "reason": "FailedScheduling",
+        "message": "0/3 nodes are available: 3 Insufficient memory. preemption: 0/3 nodes are available: 3 No preemption victims found for incoming pod.",
+        "count": 30,
+        "firstTime": "2024-01-15T09:00:00Z",
+        "lastTime": "2024-01-15T09:15:00Z"
+      }
+    ],
+    "pod_resource_requests": {
+      "memory": "8Gi",
+      "cpu": "4000m"
+    },
+    "node_allocatable": [
+      {"node": "node-1", "cpu": "3800m", "memory": "6Gi"},
+      {"node": "node-2", "cpu": "3500m", "memory": "5.5Gi"},
+      {"node": "node-3", "cpu": "3600m", "memory": "4.8Gi"}
+    ],
+    "cluster_autoscaler_status": {
+      "enabled": true,
+      "last_scale_up": "2024-01-14T22:00:00Z",
+      "scale_up_in_cooldown": true,
+      "cooldown_remaining_secs": 1800
+    },
+    "recent_changes": [
+      {
+        "type": "Deployment",
+        "message": "data-pipeline memory request increased from 2Gi to 8Gi for large dataset processing",
+        "timestamp": "2024-01-15T08:55:00Z"
+      }
+    ]
+  }
+}

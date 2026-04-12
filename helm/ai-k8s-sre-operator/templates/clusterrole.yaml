@@ -1,0 +1,78 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "ai-k8s-sre-operator.fullname" . }}
+  labels:
+    {{- include "ai-k8s-sre-operator.labels" . | nindent 4 }}
+rules:
+  # Read-only access to core workload resources
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - services
+      - endpoints
+      - events
+      - namespaces
+      - nodes
+      - persistentvolumeclaims
+      - persistentvolumes
+      - configmaps
+    verbs: ["get", "list", "watch"]
+
+  # Read-only access to apps resources
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+    verbs: ["get", "list", "watch"]
+
+  # Read-only access to batch resources
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["get", "list", "watch"]
+
+  # Read-only access to networking resources
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs: ["get", "list", "watch"]
+
+  # Read-only access to endpoint slices
+  - apiGroups: ["discovery.k8s.io"]
+    resources:
+      - endpointslices
+    verbs: ["get", "list", "watch"]
+
+  # Read-only access to autoscaling
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["get", "list", "watch"]
+
+  # Write access for safe remediations (Level 1 and Level 2 actions only)
+  - apiGroups: [""]
+    resources:
+      - pods/eviction
+    verbs: ["create"]
+
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+    verbs: ["get", "list", "watch", "patch", "update"]
+
+  - apiGroups: ["apps"]
+    resources:
+      - deployments/scale
+    verbs: ["get", "update", "patch"]
+
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+    verbs: ["get", "list", "watch", "create", "delete"]
+{{- end }}

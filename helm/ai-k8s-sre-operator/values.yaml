@@ -1,0 +1,149 @@
+## Default values for ai-k8s-sre-operator
+
+replicaCount:
+  api: 1
+  worker: 1
+  watcher: 1
+
+image:
+  repository: ghcr.io/anil-114912/ai-k8s-sre-operator
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+## LLM configuration
+llm:
+  provider: anthropic       # anthropic | openai | rule-based
+  existingSecret: ""        # name of existing secret with LLM_API_KEY
+  apiKey: ""               # (prefer existingSecret in production)
+
+## Operator behaviour
+operator:
+  dryRun: true              # never auto-execute in prod without explicit opt-in
+  autoFixEnabled: false     # set true to allow Level 1 auto-fix actions
+  deniedNamespaces:
+    - kube-system
+    - kube-public
+  cooldownSecs: 300         # seconds between remediations of the same workload
+  watchIntervalSecs: 30     # cluster poll interval
+  logLevel: INFO
+  demoMode: "0"             # set "1" for demo mode without K8s cluster
+
+## Prometheus integration
+prometheus:
+  url: http://prometheus-server.monitoring.svc:9090
+  enabled: true
+
+## Loki integration (optional)
+loki:
+  url: ""
+  enabled: false
+
+## Database
+database:
+  type: sqlite              # sqlite | postgres
+  url: ""                   # for postgres: postgresql://user:pass@host:5432/dbname
+
+## Persistence for SQLite
+persistence:
+  enabled: true
+  storageClass: ""          # "" = cluster default
+  accessMode: ReadWriteOnce
+  size: 5Gi
+  mountPath: /data
+
+## Service Account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ai-sre-operator
+
+## RBAC
+rbac:
+  create: true
+
+## Pod Security
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  fsGroup: 1001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+
+## Resource limits
+resources:
+  api:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  worker:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 512Mi
+  watcher:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+## Service configuration
+service:
+  type: ClusterIP
+  port: 8000
+  targetPort: 8000
+
+## Ingress (for API)
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: sre-operator.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+## Streamlit UI
+ui:
+  enabled: true
+  port: 8501
+  service:
+    type: ClusterIP
+    port: 8501
+
+## Autoscaling
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+
+## Node selector, tolerations, affinity
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+## Prometheus ServiceMonitor
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}

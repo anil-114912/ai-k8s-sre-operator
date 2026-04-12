@@ -1,0 +1,27 @@
+- id: learned-20260412034943-1
+  title: 'Learned: CrashLoopBackOff in production/test-api'
+  scope: pod
+  symptoms:
+  - Application error in test-api
+  event_patterns: []
+  log_patterns:
+  - 'ERROR: secret not found'
+  metric_patterns: []
+  root_cause: 'Application error detected in production/test-api: ERROR: secret not
+    found'
+  remediation_steps:
+  - 'Check application logs: kubectl logs -n production -l app=test-api'
+  - 'Describe pod: kubectl describe pod -n production -l app=test-api'
+  - Review recent deployments for code changes that may have introduced the error
+  confidence_hints: []
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags:
+  - learned
+  - crashloopbackoff
+  - production
+  learned_from_namespace: production
+  learned_from_workload: test-api
+  learned_at: '2026-04-12T03:49:43.497720+00:00'
+  feedback_count: 2
+  success_count: 2

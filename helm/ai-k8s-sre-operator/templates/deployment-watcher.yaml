@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ai-k8s-sre-operator.fullname" . }}-watcher
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ai-k8s-sre-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: watcher
+spec:
+  replicas: {{ .Values.replicaCount.watcher }}
+  selector:
+    matchLabels:
+      {{- include "ai-k8s-sre-operator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: watcher
+  template:
+    metadata:
+      labels:
+        {{- include "ai-k8s-sre-operator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: watcher
+    spec:
+      serviceAccountName: {{ include "ai-k8s-sre-operator.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: watcher
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python3", "-m", "collectors.k8s_watcher"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "ai-k8s-sre-operator.fullname" . }}-config
+          resources:
+            {{- toYaml .Values.resources.watcher | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

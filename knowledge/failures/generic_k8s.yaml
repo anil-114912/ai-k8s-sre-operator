@@ -1,0 +1,369 @@
+- id: k8s-001
+  title: "CrashLoopBackOff — missing secret"
+  scope: pod
+  symptoms:
+    - "Pod status: CrashLoopBackOff"
+    - "restart_count > 5"
+    - "Container exits immediately on startup"
+  event_patterns:
+    - "secret.*not found"
+    - "Error: secret"
+    - "secretKeyRef"
+    - "secret"
+  log_patterns:
+    - "secret.*not found"
+    - "failed to load config"
+    - "nil pointer dereference"
+    - "environment variable.*not set"
+    - "no value for"
+  metric_patterns: []
+  root_cause: "Application references a Kubernetes Secret that does not exist in the namespace or has a missing key"
+  remediation_steps:
+    - "Verify secret exists: kubectl get secret <name> -n <namespace>"
+    - "Describe pod to see exact secret reference: kubectl describe pod <pod-name> -n <namespace>"
+    - "Create missing secret: kubectl create secret generic <name> --from-literal=key=value -n <namespace>"
+    - "Restart deployment after secret creation: kubectl rollout restart deployment/<name> -n <namespace>"
+    - "Verify rollout: kubectl rollout status deployment/<name> -n <namespace>"
+  confidence_hints:
+    - pattern: "secret.*not found"
+      boost: 0.3
+    - pattern: "secretKeyRef"
+      boost: 0.2
+    - pattern: "secret"
+      boost: 0.15
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [crashloop, secret, config, startup]
+
+- id: k8s-002
+  title: "CrashLoopBackOff — missing ConfigMap"
+  scope: pod
+  symptoms:
+    - "Pod status: CrashLoopBackOff"
+    - "restart_count > 3"
+    - "Container exits with non-zero code"
+  event_patterns:
+    - "configmap .* not found"
+    - "Error: configmap"
+    - "configMapKeyRef"
+  log_patterns:
+    - "configmap .* not found"
+    - "config file not found"
+    - "failed to read config"
+    - "no such file or directory"
+  metric_patterns: []
+  root_cause: "Application references a Kubernetes ConfigMap that does not exist in the namespace"
+  remediation_steps:
+    - "Verify configmap exists: kubectl get configmap <name> -n <namespace>"
+    - "Create missing configmap: kubectl create configmap <name> --from-file=<config-file> -n <namespace>"
+    - "Restart deployment: kubectl rollout restart deployment/<name> -n <namespace>"
+  confidence_hints:
+    - pattern: "configmap .* not found"
+      boost: 0.3
+    - pattern: "configMapKeyRef"
+      boost: 0.2
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [crashloop, configmap, config, startup]
+
+- id: k8s-003
+  title: "CrashLoopBackOff — OOMKill"
+  scope: pod
+  symptoms:
+    - "Pod status: CrashLoopBackOff"
+    - "exit code 137"
+    - "OOMKilled in lastState.terminated"
+    - "restart_count > 3"
+  event_patterns:
+    - "OOMKilled"
+    - "out of memory"
+    - "memory limit"
+  log_patterns:
+    - "out of memory"
+    - "killed process"
+    - "memory allocation failed"
+  metric_patterns:
+    - "container_memory_usage_bytes > limits"
+  root_cause: "Container memory usage exceeded the configured limits.memory, causing the Linux OOM killer to terminate the process"
+  remediation_steps:
+    - "Check current memory limits: kubectl get pod <name> -n <namespace> -o jsonpath='{.spec.containers[*].resources.limits.memory}'"
+    - "Increase memory limit by 50-100%: kubectl set resources deployment/<name> --limits=memory=<new-limit> -n <namespace>"
+    - "Enable memory profiling to identify leaks in application code"
+    - "Restart deployment: kubectl rollout restart deployment/<name> -n <namespace>"
+  confidence_hints:
+    - pattern: "OOMKilled"
+      boost: 0.4
+    - pattern: "exit code 137"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: approval_required
+  tags: [crashloop, oom, memory, resources]
+
+- id: k8s-004
+  title: "CrashLoopBackOff — liveness probe failure"
+  scope: pod
+  symptoms:
+    - "Pod status: CrashLoopBackOff"
+    - "Liveness probe failed events"
+    - "Container killed by liveness probe"
+  event_patterns:
+    - "Liveness probe failed"
+    - "Killing container with id"
+    - "probe failed"
+  log_patterns:
+    - "liveness probe"
+    - "health check failed"
+    - "probe endpoint not responding"
+  metric_patterns: []
+  root_cause: "The liveness probe is failing because the health endpoint returns non-2xx, times out, or the application is in a deadlock/stuck state"
+  remediation_steps:
+    - "Inspect probe configuration: kubectl get pod <name> -n <namespace> -o yaml | grep -A10 livenessProbe"
+    - "Test health endpoint manually: kubectl exec <pod> -- curl -f http://localhost:<port><path>"
+    - "Increase initialDelaySeconds and timeoutSeconds in the liveness probe"
+    - "Check application logs for deadlocks or health endpoint errors"
+    - "Patch probe: kubectl patch deployment/<name> -n <namespace> --patch <probe-patch>"
+  confidence_hints:
+    - pattern: "Liveness probe failed"
+      boost: 0.35
+    - pattern: "Killing container"
+      boost: 0.2
+  safe_auto_fix: false
+  safety_level: approval_required
+  tags: [crashloop, probe, liveness, health-check]
+
+- id: k8s-005
+  title: "CrashLoopBackOff — bad command or entrypoint"
+  scope: pod
+  symptoms:
+    - "Pod status: CrashLoopBackOff"
+    - "exit code 1 or 127 or 126"
+    - "Container exits immediately"
+  event_patterns:
+    - "exec: .* not found"
+    - "container failed to start"
+  log_patterns:
+    - "exec format error"
+    - "no such file or directory"
+    - "permission denied"
+    - "command not found"
+    - "exec:"
+  metric_patterns: []
+  root_cause: "The container command or entrypoint is invalid — binary not found, wrong path, or exec format error (architecture mismatch)"
+  remediation_steps:
+    - "Check pod command/args: kubectl get pod <name> -n <namespace> -o yaml | grep -A5 'command\\|args'"
+    - "Verify binary exists in image: docker run --entrypoint /bin/sh <image> -c 'ls -la <binary-path>'"
+    - "Check for architecture mismatch (linux/amd64 vs linux/arm64)"
+    - "Update deployment with correct command: kubectl set image or patch the deployment spec"
+  confidence_hints:
+    - pattern: "exec format error"
+      boost: 0.35
+    - pattern: "command not found"
+      boost: 0.25
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [crashloop, command, entrypoint, image]
+
+- id: k8s-006
+  title: "ImagePullBackOff — wrong or missing tag"
+  scope: pod
+  symptoms:
+    - "Pod status: ImagePullBackOff or ErrImagePull"
+    - "Image pull error in events"
+  event_patterns:
+    - "Failed to pull image"
+    - "manifest unknown"
+    - "not found"
+    - "tag does not exist"
+  log_patterns: []
+  metric_patterns: []
+  root_cause: "Kubernetes cannot pull the container image because the tag does not exist in the registry — the CI pipeline may have failed or the tag was mistyped"
+  remediation_steps:
+    - "Verify image exists: docker manifest inspect <image>:<tag>"
+    - "Check registry for available tags: docker image ls or registry UI"
+    - "Rollback deployment to last working tag: kubectl rollout undo deployment/<name> -n <namespace>"
+    - "Or update deployment with correct tag: kubectl set image deployment/<name> <container>=<image>:<correct-tag> -n <namespace>"
+  confidence_hints:
+    - pattern: "manifest unknown"
+      boost: 0.3
+    - pattern: "tag does not exist"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: approval_required
+  tags: [imagepull, image, registry, ci-cd]
+
+- id: k8s-007
+  title: "ImagePullBackOff — private registry auth failure"
+  scope: pod
+  symptoms:
+    - "Pod status: ImagePullBackOff"
+    - "Unauthorized or 401 in pull error"
+    - "imagePullSecrets not configured"
+  event_patterns:
+    - "unauthorized"
+    - "authentication required"
+    - "401"
+    - "no credentials"
+  log_patterns: []
+  metric_patterns: []
+  root_cause: "The Kubernetes node cannot authenticate to the private container registry — imagePullSecret is missing or the credentials have expired"
+  remediation_steps:
+    - "Verify imagePullSecret exists: kubectl get secret <name> -n <namespace> -o yaml"
+    - "Create or recreate the pull secret: kubectl create secret docker-registry <name> --docker-server=<registry> --docker-username=<user> --docker-password=<pass> -n <namespace>"
+    - "Patch deployment to use pull secret: kubectl patch serviceaccount default -n <namespace> -p '{\"imagePullSecrets\": [{\"name\": \"<secret-name>\"}]}'"
+    - "Restart pods: kubectl rollout restart deployment/<name> -n <namespace>"
+  confidence_hints:
+    - pattern: "unauthorized"
+      boost: 0.35
+    - pattern: "authentication required"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [imagepull, image, registry, auth, secret]
+
+- id: k8s-008
+  title: "Pod Pending — insufficient CPU"
+  scope: pod
+  symptoms:
+    - "Pod status: Pending"
+    - "FailedScheduling events"
+    - "Insufficient cpu"
+  event_patterns:
+    - "Insufficient cpu"
+    - "FailedScheduling"
+    - "0/N nodes are available"
+  log_patterns: []
+  metric_patterns:
+    - "node cpu allocatable exhausted"
+  root_cause: "The pod's CPU requests cannot be satisfied by any available node — the cluster is at CPU capacity or node selectors/taints prevent scheduling"
+  remediation_steps:
+    - "Check scheduler events: kubectl describe pod <name> -n <namespace> | grep -A5 Events"
+    - "View node CPU allocatable: kubectl get nodes -o custom-columns=NAME:.metadata.name,CPU:.status.allocatable.cpu"
+    - "Scale cluster node group or add nodes"
+    - "Reduce pod CPU requests if they are over-estimated: kubectl set resources deployment/<name> --requests=cpu=<lower-value>"
+    - "Check cluster autoscaler logs if configured: kubectl logs -n kube-system -l app=cluster-autoscaler"
+  confidence_hints:
+    - pattern: "Insufficient cpu"
+      boost: 0.4
+    - pattern: "0/N nodes are available"
+      boost: 0.2
+  safe_auto_fix: false
+  safety_level: approval_required
+  tags: [pending, resources, cpu, scheduling]
+
+- id: k8s-009
+  title: "Pod Pending — insufficient memory"
+  scope: pod
+  symptoms:
+    - "Pod status: Pending"
+    - "FailedScheduling events"
+    - "Insufficient memory"
+  event_patterns:
+    - "Insufficient memory"
+    - "FailedScheduling"
+    - "0/N nodes are available"
+  log_patterns: []
+  metric_patterns:
+    - "node memory allocatable exhausted"
+  root_cause: "The pod's memory requests exceed available allocatable memory on all nodes in the cluster"
+  remediation_steps:
+    - "Check FailedScheduling events: kubectl describe pod <name> -n <namespace>"
+    - "View node memory allocatable: kubectl get nodes -o custom-columns=NAME:.metadata.name,MEM:.status.allocatable.memory"
+    - "Add nodes or scale existing node group"
+    - "Reduce pod memory requests if appropriate: kubectl set resources deployment/<name> --requests=memory=<lower-value>"
+  confidence_hints:
+    - pattern: "Insufficient memory"
+      boost: 0.4
+  safe_auto_fix: false
+  safety_level: approval_required
+  tags: [pending, resources, memory, scheduling]
+
+- id: k8s-010
+  title: "Pod Pending — node selector mismatch"
+  scope: pod
+  symptoms:
+    - "Pod status: Pending"
+    - "FailedScheduling with node selector message"
+    - "nodeSelector defined in pod spec"
+  event_patterns:
+    - "node selector"
+    - "didn't match node selector"
+    - "MatchNodeSelector"
+    - "0/N nodes are available"
+  log_patterns: []
+  metric_patterns: []
+  root_cause: "The pod has a nodeSelector that does not match any available node's labels — nodes may have been recreated without the required labels"
+  remediation_steps:
+    - "Check pod nodeSelector: kubectl get pod <name> -n <namespace> -o yaml | grep -A5 nodeSelector"
+    - "List node labels: kubectl get nodes --show-labels"
+    - "Label a node to match selector: kubectl label node <node-name> <key>=<value>"
+    - "Or remove/update nodeSelector in deployment: kubectl edit deployment/<name> -n <namespace>"
+  confidence_hints:
+    - pattern: "MatchNodeSelector"
+      boost: 0.4
+    - pattern: "node selector"
+      boost: 0.2
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [pending, node-selector, scheduling]
+
+- id: k8s-011
+  title: "Service — selector mismatch, no endpoints"
+  scope: service
+  symptoms:
+    - "Service has no endpoints"
+    - "kubectl get endpoints shows empty"
+    - "Connection refused to service"
+  event_patterns:
+    - "no endpoints"
+    - "Endpoints not available"
+  log_patterns:
+    - "connection refused"
+    - "no route to host"
+    - "service unavailable"
+  metric_patterns: []
+  root_cause: "The Kubernetes Service selector labels do not match any running pod labels, leaving the service with empty endpoints and all traffic failing"
+  remediation_steps:
+    - "Check service selector: kubectl get svc <name> -n <namespace> -o yaml | grep -A5 selector"
+    - "Check pod labels: kubectl get pods -n <namespace> --show-labels"
+    - "Verify endpoints: kubectl get endpoints <name> -n <namespace>"
+    - "Update service selector to match pod labels: kubectl patch svc <name> -n <namespace> -p '{\"spec\":{\"selector\":{\"app\":\"<correct-label>\"}}}'"
+  confidence_hints:
+    - pattern: "no endpoints"
+      boost: 0.3
+    - pattern: "selector"
+      boost: 0.1
+  safe_auto_fix: false
+  safety_level: approval_required
+  tags: [service, selector, endpoints, networking]
+
+- id: k8s-012
+  title: "Ingress — 404 or backend unavailable"
+  scope: ingress
+  symptoms:
+    - "HTTP 404 or 503 from ingress"
+    - "Ingress backend service missing"
+    - "Ingress controller logs show upstream unavailable"
+  event_patterns:
+    - "no endpoints"
+    - "service not found"
+    - "backend unavailable"
+  log_patterns:
+    - "404"
+    - "upstream unavailable"
+    - "no endpoints in upstream"
+    - "service not found"
+  metric_patterns: []
+  root_cause: "The Ingress rule references a backend Service that does not exist or has no healthy endpoints, causing 404/503 responses"
+  remediation_steps:
+    - "Check ingress backend: kubectl get ingress <name> -n <namespace> -o yaml"
+    - "Verify backend service exists: kubectl get svc -n <namespace>"
+    - "Check endpoints: kubectl get endpoints -n <namespace>"
+    - "Fix service name typo in ingress or create the missing service"
+  confidence_hints:
+    - pattern: "service not found"
+      boost: 0.3
+    - pattern: "no endpoints in upstream"
+      boost: 0.25
+  safe_auto_fix: false
+  safety_level: approval_required
+  tags: [ingress, service, 404, 503, networking]

@@ -1,0 +1,112 @@
+- id: gke-001
+  title: "GKE Workload Identity missing or misconfigured"
+  scope: pod
+  symptoms:
+    - "Google API permission denied in pod logs"
+    - "Unable to authenticate with Workload Identity"
+    - "Metadata server returns 403"
+  event_patterns:
+    - "workload identity"
+    - "PERMISSION_DENIED"
+    - "iam"
+  log_patterns:
+    - "PERMISSION_DENIED"
+    - "workload identity"
+    - "unable to authenticate"
+    - "google.golang.org/grpc"
+    - "403 Forbidden"
+    - "ServiceAccountTokenCreator"
+    - "iam.googleapis.com"
+  metric_patterns: []
+  root_cause: "The GKE Workload Identity binding between the Kubernetes ServiceAccount and the Google Service Account (GSA) is missing or the IAM policy binding is incorrect"
+  remediation_steps:
+    - "Check KSA annotation: kubectl get sa <ksa-name> -n <namespace> -o yaml | grep iam.gke.io"
+    - "Verify IAM binding: gcloud iam service-accounts get-iam-policy <gsa-name>@<project>.iam.gserviceaccount.com"
+    - "Create binding: gcloud iam service-accounts add-iam-policy-binding <gsa-name>@<project>.iam.gserviceaccount.com --role=roles/iam.workloadIdentityUser --member='serviceAccount:<project>.svc.id.goog[<namespace>/<ksa-name>]'"
+    - "Annotate KSA: kubectl annotate sa <ksa-name> -n <namespace> iam.gke.io/gcp-service-account=<gsa-name>@<project>.iam.gserviceaccount.com"
+    - "Restart pods to pick up Workload Identity token"
+  confidence_hints:
+    - pattern: "PERMISSION_DENIED"
+      boost: 0.3
+    - pattern: "workload identity"
+      boost: 0.4
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [gke, gcp, workload-identity, iam, serviceaccount, permissions]
+  provider: gcp
+
+- id: gke-002
+  title: "GKE Autopilot resource quota exceeded"
+  scope: cluster
+  symptoms:
+    - "Pod evicted or not scheduled on Autopilot"
+    - "Resource request exceeds Autopilot maximums"
+    - "GKE Autopilot quota limit hit"
+  event_patterns:
+    - "autopilot"
+    - "quota exceeded"
+    - "resource limit"
+    - "evicted"
+  log_patterns:
+    - "autopilot"
+    - "quota exceeded"
+    - "resource request"
+    - "maximum allowed"
+  metric_patterns: []
+  root_cause: "GKE Autopilot has per-namespace resource quotas and maximum per-pod resource limits that the workload exceeds — Autopilot enforces stricter resource constraints than standard GKE"
+  remediation_steps:
+    - "Check Autopilot constraints: kubectl describe resourcequota -n <namespace>"
+    - "Review pod resource requests: kubectl get pod <name> -n <namespace> -o yaml | grep -A10 resources"
+    - "Reduce pod memory/CPU requests to fit within Autopilot limits"
+    - "Split large workloads across multiple pods"
+    - "Request quota increase via GCP console: IAM & Admin > Quotas"
+    - "Consider migrating large workloads to standard GKE node pools"
+  confidence_hints:
+    - pattern: "autopilot"
+      boost: 0.4
+    - pattern: "quota exceeded"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [gke, gcp, autopilot, quota, resources, scheduling]
+  provider: gcp
+
+- id: gke-003
+  title: "GKE Filestore (NFS) mount failure"
+  scope: pod
+  symptoms:
+    - "Filestore volume mount timeout"
+    - "NFS mount failed in pod events"
+    - "access denied to Filestore share"
+  event_patterns:
+    - "Filestore"
+    - "NFS"
+    - "mount failed"
+    - "FailedMount"
+  log_patterns:
+    - "filestore"
+    - "nfs"
+    - "mount failed"
+    - "access denied"
+    - "nfs mount"
+    - "server not responding"
+  metric_patterns: []
+  root_cause: "The GKE pod cannot mount a Google Cloud Filestore NFS volume — causes include network connectivity issues, VPC firewall blocking NFS port 2049, Filestore instance not ready, or IP range conflicts"
+  remediation_steps:
+    - "Check FailedMount event: kubectl describe pod <name> -n <namespace>"
+    - "Verify Filestore instance is READY: gcloud filestore instances list"
+    - "Check VPC firewall rule allows TCP/UDP port 2049 from GKE node CIDR to Filestore IP"
+    - "Test NFS connectivity: kubectl exec <pod> -- showmount -e <filestore-ip>"
+    - "Verify Filestore IP and NFS export path in PV spec"
+    - "Check authorized networks on Filestore instance"
+  confidence_hints:
+    - pattern: "Filestore"
+      boost: 0.4
+    - pattern: "NFS"
+      boost: 0.25
+    - pattern: "mount failed"
+      boost: 0.2
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [gke, gcp, filestore, nfs, storage, mount]
+  provider: gcp

@@ -1,0 +1,259 @@
+- id: net-001
+  title: "DNS resolution failure"
+  scope: pod
+  symptoms:
+    - "dial tcp: lookup <hostname>: no such host"
+    - "DNS timeout in pod logs"
+    - "Service name not resolving"
+  event_patterns:
+    - "CoreDNS"
+    - "dns resolution"
+    - "lookup failed"
+  log_patterns:
+    - "no such host"
+    - "dial tcp: lookup"
+    - "dns resolution failed"
+    - "getaddrinfow"
+    - "i/o timeout"
+    - "failed to resolve"
+  metric_patterns:
+    - "coredns error rate > 0"
+  root_cause: "DNS resolution is failing because CoreDNS pods are unhealthy, network policy blocks DNS traffic to port 53, or the service/host name is incorrect"
+  remediation_steps:
+    - "Check CoreDNS pod health: kubectl get pods -n kube-system -l k8s-app=kube-dns"
+    - "View CoreDNS logs: kubectl logs -n kube-system -l k8s-app=kube-dns"
+    - "Test DNS from pod: kubectl exec <pod> -- nslookup kubernetes.default"
+    - "Check for NetworkPolicy blocking DNS (port 53): kubectl get networkpolicies -n <namespace>"
+    - "Restart CoreDNS if unhealthy: kubectl rollout restart deployment/coredns -n kube-system"
+  confidence_hints:
+    - pattern: "no such host"
+      boost: 0.35
+    - pattern: "CoreDNS"
+      boost: 0.2
+  safe_auto_fix: false
+  safety_level: approval_required
+  tags: [dns, networking, coredns, connectivity]
+
+- id: net-002
+  title: "NetworkPolicy blocking pod traffic"
+  scope: namespace
+  symptoms:
+    - "Connection timeouts between specific services"
+    - "NetworkPolicy objects present in namespace"
+    - "Intermittent connection refused errors"
+  event_patterns:
+    - "connection refused"
+    - "network policy"
+  log_patterns:
+    - "connection timed out"
+    - "connection refused"
+    - "no route to host"
+    - "upstream connect error"
+    - "dial tcp"
+  metric_patterns: []
+  root_cause: "A Kubernetes NetworkPolicy is blocking traffic between pods — either missing an egress allow rule for the source or an ingress allow rule for the destination"
+  remediation_steps:
+    - "List NetworkPolicies: kubectl get networkpolicies -n <namespace> -o yaml"
+    - "Test connectivity: kubectl exec <source-pod> -- nc -zv <dest-service> <port>"
+    - "Add egress allow rule for source pod to reach destination"
+    - "Add ingress allow rule on destination to accept traffic from source"
+    - "Example: kubectl apply -f <networkpolicy-allow-rule.yaml>"
+  confidence_hints:
+    - pattern: "connection timed out"
+      boost: 0.2
+    - pattern: "network policy"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [networkpolicy, networking, connectivity, security]
+
+- id: net-003
+  title: "Service has no endpoints"
+  scope: service
+  symptoms:
+    - "kubectl get endpoints shows empty address list"
+    - "503 Service Unavailable from downstream"
+    - "All pods are unhealthy or not running"
+  event_patterns:
+    - "no endpoints available"
+    - "endpoints not ready"
+  log_patterns:
+    - "upstream unavailable"
+    - "no healthy upstreams"
+    - "503"
+  metric_patterns: []
+  root_cause: "The Service has an empty endpoint list because all matching pods are not in Ready state, or there are no pods matching the service selector at all"
+  remediation_steps:
+    - "Check endpoints: kubectl get endpoints <svc-name> -n <namespace>"
+    - "Check if pods exist and are Ready: kubectl get pods -n <namespace> -l <selector-key>=<selector-value>"
+    - "If selector mismatch: update service selector to match pod labels"
+    - "If pods are crashing: investigate pod logs and events to fix underlying issue"
+    - "If no pods: check if deployment exists and has desired replicas > 0"
+  confidence_hints:
+    - pattern: "no endpoints available"
+      boost: 0.35
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [service, endpoints, networking, availability]
+
+- id: net-004
+  title: "Ingress backend service unavailable"
+  scope: ingress
+  symptoms:
+    - "HTTP 503 from ingress controller"
+    - "Upstream connect error in ingress logs"
+    - "Backend service has no ready pods"
+  event_patterns:
+    - "upstream unavailable"
+    - "no healthy backend"
+  log_patterns:
+    - "upstream connect error"
+    - "no healthy upstream"
+    - "503 service unavailable"
+    - "connect() failed"
+  metric_patterns:
+    - "ingress error rate > 5%"
+  root_cause: "The Ingress controller cannot route traffic to the backend because the target Service has no ready endpoints — all backend pods are down or crashing"
+  remediation_steps:
+    - "Check ingress backend service: kubectl get svc <backend-name> -n <namespace>"
+    - "Check backend pod health: kubectl get pods -n <namespace> -l <selector>"
+    - "View backend pod logs for crash reason: kubectl logs <pod> -n <namespace>"
+    - "Fix underlying pod crash, then verify ingress routes traffic"
+  confidence_hints:
+    - pattern: "no healthy upstream"
+      boost: 0.3
+    - pattern: "upstream connect error"
+      boost: 0.25
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [ingress, service, 503, backend, networking]
+
+- id: net-005
+  title: "CNI IP address exhaustion"
+  scope: cluster
+  symptoms:
+    - "Pod stuck in Pending with network plugin error"
+    - "NetworkPluginNotReady event on node"
+    - "failed to allocate IP address"
+    - "CIDR exhausted"
+  event_patterns:
+    - "NetworkPluginNotReady"
+    - "failed to allocate"
+    - "CIDR exhausted"
+    - "no available ip"
+  log_patterns:
+    - "ip exhausted"
+    - "failed to allocate ip"
+    - "cidr exhausted"
+    - "no available addresses"
+  metric_patterns: []
+  root_cause: "The CNI plugin has exhausted the IP address range (CIDR block) allocated to the node — no new pods can be scheduled on this node until IPs are released"
+  remediation_steps:
+    - "Check node CIDR: kubectl get node <name> -o yaml | grep podCIDR"
+    - "Find pods in Terminating state consuming IPs: kubectl get pods --all-namespaces | grep Terminating"
+    - "Force delete stuck Terminating pods: kubectl delete pod <name> -n <ns> --force --grace-period=0"
+    - "For AWS: increase ENI/IP limits or add nodes with larger CIDR blocks"
+    - "Check CNI plugin logs: kubectl logs -n kube-system -l app=aws-node (or calico-node, flannel)"
+  confidence_hints:
+    - pattern: "CIDR exhausted"
+      boost: 0.4
+    - pattern: "failed to allocate"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [cni, networking, ip-exhaustion, cidr, pending]
+
+- id: net-006
+  title: "Service mesh mTLS policy mismatch"
+  scope: namespace
+  symptoms:
+    - "TLS handshake errors between services"
+    - "503 from Envoy proxy"
+    - "Peer certificate verification failed"
+  event_patterns:
+    - "TLS handshake"
+    - "mtls"
+    - "certificate"
+  log_patterns:
+    - "mtls handshake failed"
+    - "tls handshake error"
+    - "certificate verify failed"
+    - "peer certificate"
+    - "ssl error"
+    - "tls error"
+  metric_patterns: []
+  root_cause: "Istio or Linkerd mTLS policy mismatch — one side expects mTLS while the other sends plaintext, or certificate chain is invalid"
+  remediation_steps:
+    - "Check PeerAuthentication policy: kubectl get peerauthentication -n <namespace>"
+    - "Check DestinationRule mTLS mode: kubectl get destinationrule -n <namespace>"
+    - "Verify both sides have sidecar injected: kubectl get pods -n <namespace> -o jsonpath='{.items[*].spec.containers[*].name}'"
+    - "Temporarily set PERMISSIVE mode to diagnose: kubectl apply -f peer-auth-permissive.yaml"
+    - "Check certificate expiry: istioctl check-inject <namespace>/<pod>"
+  confidence_hints:
+    - pattern: "tls handshake error"
+      boost: 0.35
+    - pattern: "mtls"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [service-mesh, istio, mtls, tls, certificate]
+
+- id: net-007
+  title: "Service mesh circuit breaker open"
+  scope: service
+  symptoms:
+    - "Circuit breaker open in Envoy logs"
+    - "Consecutive 5xx errors to upstream"
+    - "Upstream ejected from load balancer"
+  event_patterns:
+    - "circuit breaker"
+    - "consecutive errors"
+  log_patterns:
+    - "circuit breaker"
+    - "consecutive errors"
+    - "ejected from load balancer"
+    - "upstream overflow"
+    - "pending_failure_eject"
+  metric_patterns:
+    - "envoy_cluster_outlier_detection_ejections_active > 0"
+  root_cause: "Istio/Envoy circuit breaker has tripped because the upstream service exceeded consecutive error thresholds — the service is temporarily excluded from load balancing"
+  remediation_steps:
+    - "Identify which upstream hosts are ejected: check Envoy admin /clusters endpoint"
+    - "Fix the upstream service causing the errors (check its logs and health)"
+    - "Wait for ejection recovery window to pass (default 30s)"
+    - "Tune OutlierDetection in DestinationRule: reduce consecutiveErrors threshold or increase interval"
+    - "Check DestinationRule: kubectl get destinationrule <name> -n <namespace> -o yaml"
+  confidence_hints:
+    - pattern: "circuit breaker"
+      boost: 0.4
+    - pattern: "ejected from load balancer"
+      boost: 0.35
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [service-mesh, circuit-breaker, istio, envoy, availability]
+
+- id: net-008
+  title: "Load balancer service pending external IP"
+  scope: service
+  symptoms:
+    - "Service type LoadBalancer shows <pending> EXTERNAL-IP"
+    - "No external IP assigned after 5+ minutes"
+  event_patterns:
+    - "load balancer"
+    - "external IP"
+    - "service pending"
+  log_patterns: []
+  metric_patterns: []
+  root_cause: "The cloud provider LoadBalancer provisioning failed — quota exhausted, IAM permissions missing, or the cloud controller manager is not running"
+  remediation_steps:
+    - "Check service status: kubectl describe svc <name> -n <namespace>"
+    - "View cloud controller manager logs: kubectl logs -n kube-system -l component=cloud-controller-manager"
+    - "Check cloud load balancer quotas in the cloud console"
+    - "Verify cloud controller manager has IAM permissions to create load balancers"
+    - "For local/on-prem: install MetalLB or use NodePort instead"
+  confidence_hints:
+    - pattern: "load balancer pending"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [service, load-balancer, cloud, networking, pending]

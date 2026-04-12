@@ -1,0 +1,749 @@
+"""FastAPI application — REST API for the AI K8s SRE Operator."""
+from __future__ import annotations
+
+import logging
+import os
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from ai.rca_engine import RCAEngine
+from ai.remediation_engine import RemediationEngine
+from ai.incident_ranker import IncidentRanker
+from correlation.signal_correlator import SignalCorrelator
+from detectors.crashloop_detector import CrashLoopDetector
+from detectors.oomkill_detector import OOMKillDetector
+from detectors.imagepull_detector import ImagePullDetector
+from detectors.pending_pods_detector import PendingPodsDetector
+from detectors.probe_failure_detector import ProbeFailureDetector
+from detectors.service_detector import ServiceDetector
+from detectors.ingress_detector import IngressDetector
+from detectors.pvc_detector import PVCDetector
+from detectors.hpa_detector import HPADetector
+from detectors.dns_detector import DNSDetector
+from detectors.rbac_detector import RBACDetector
+from detectors.network_policy_detector import NetworkPolicyDetector
+from detectors.cni_detector import CNIDetector
+from detectors.service_mesh_detector import ServiceMeshDetector
+from detectors.node_pressure_detector import NodePressureDetector
+from detectors.quota_detector import QuotaDetector
+from detectors.rollout_detector import RolloutDetector
+from detectors.storage_detector import StorageDetector
+from knowledge.failure_kb import FailureKnowledgeBase
+from knowledge.feedback_store import FeedbackStore
+from knowledge.incident_store import IncidentStore
+from knowledge.learning import ContextBuilder
+from knowledge.feedback_loop import LearningLoop
+from models.cluster_resource import ClusterHealthSummary
+from models.incident import Incident, IncidentStatus, IncidentType, Severity
+from models.remediation import RemediationPlan, RemediationStatus
+from providers.kubernetes import get_k8s_client
+from remediations.policy_guardrails import PolicyGuardrails
+
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logger = logging.getLogger(__name__)
+
+app = FastAPI(
+    title="AI K8s SRE Operator",
+    description="Continuous Kubernetes incident detection, AI root cause analysis, and safe automated remediation",
+    version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------------------------------------------------------------------
+# Application state
+# ---------------------------------------------------------------------------
+
+_store = IncidentStore()
+_incidents: Dict[str, Incident] = {}
+_plans: Dict[str, RemediationPlan] = {}
+
+_rca_engine = RCAEngine()
+_rem_engine = RemediationEngine()
+_ranker = IncidentRanker()
+_correlator = SignalCorrelator()
+_context_builder = ContextBuilder(_store)
+_guardrails = PolicyGuardrails()
+_feedback_store = FeedbackStore(_store)
+_learning_loop = LearningLoop(_store)
+
+# Load knowledge base at startup
+_kb = FailureKnowledgeBase()
+_kb.load()
+
+DETECTORS = [
+    CrashLoopDetector(),
+    OOMKillDetector(),
+    ImagePullDetector(),
+    PendingPodsDetector(),
+    ProbeFailureDetector(),
+    ServiceDetector(),
+    IngressDetector(),
+    PVCDetector(),
+    HPADetector(),
+    DNSDetector(),
+    RBACDetector(),
+    NetworkPolicyDetector(),
+    CNIDetector(),
+    ServiceMeshDetector(),
+    NodePressureDetector(),
+    QuotaDetector(),
+    RolloutDetector(),
+    StorageDetector(),
+]
+
+
+# ---------------------------------------------------------------------------
+# Request / response helpers
+# ---------------------------------------------------------------------------
+
+class FeedbackRequest(BaseModel):
+    """Operator feedback submission payload."""
+
+    incident_id: str
+    plan_summary: str = ""
+    success: bool
+    notes: str = ""
+
+
+class ScanResponse(BaseModel):
+    """Response from a cluster scan."""
+
+    scanned_at: str
+    total_detections: int
+    incidents_created: int
+    incident_ids: List[str]
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/health")
+async def health() -> Dict[str, str]:
+    """Health check endpoint."""
+    return {"status": "ok", "service": "ai-k8s-sre-operator", "version": "0.1.0"}
+
+
+@app.post("/api/v1/incidents", response_model=Incident)
+async def create_incident(incident: Incident) -> Incident:
+    """Ingest a new incident.
+
+    Args:
+        incident: Incident payload from client.
+
+    Returns:
+        The stored incident.
+    """
+    _incidents[incident.id] = incident
+    _store.save_incident(incident)
+
+    # Trigger learning loop: capture unknown errors from raw signals
+    raw = incident.raw_signals or {}
+    if raw.get("recent_logs") or raw.get("dns_error_lines") or raw.get("rbac_log_lines"):
+        log_lines = []
+        if isinstance(raw.get("recent_logs"), list):
+            log_lines = raw["recent_logs"]
+        elif isinstance(raw.get("recent_logs"), dict):
+            for v in raw["recent_logs"].values():
+                if isinstance(v, list):
+                    log_lines.extend(v)
+        for key in ("dns_error_lines", "rbac_log_lines", "cni_log_lines", "connection_error_lines"):
+            if isinstance(raw.get(key), list):
+                log_lines.extend(raw[key])
+        if log_lines:
+            _learning_loop.capture_unknown_errors(
+                log_lines=log_lines,
+                namespace=incident.namespace,
+                workload=incident.workload,
+                incident_type=incident.incident_type.value,
+            )
+
+    # Notify learning loop for embedder refit tracking
+    _learning_loop.on_incident_saved(
+        f"{incident.title} {incident.incident_type.value} {incident.namespace}"
+    )
+
+    logger.info("Incident ingested: %s", incident.id)
+    return incident
+
+
+@app.get("/api/v1/incidents")
+async def list_incidents(
+    severity: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    namespace: Optional[str] = Query(None),
+    limit: int = Query(50, le=500),
+) -> List[Dict[str, Any]]:
+    """List all incidents with optional filters.
+
+    Args:
+        severity: Filter by severity level.
+        status: Filter by incident status.
+        namespace: Filter by namespace.
+        limit: Maximum number of results.
+
+    Returns:
+        List of incident dicts.
+    """
+    results = list(_incidents.values())
+
+    if severity:
+        results = [i for i in results if i.severity.value == severity]
+    if status:
+        results = [i for i in results if i.status.value == status]
+    if namespace:
+        results = [i for i in results if i.namespace == namespace]
+
+    # Rank by urgency
+    ranked = _ranker.rank(results)
+
+    return [i.model_dump() for i in ranked[:limit]]
+
+
+@app.get("/api/v1/incidents/{incident_id}")
+async def get_incident(incident_id: str) -> Dict[str, Any]:
+    """Get full details for a specific incident.
+
+    Args:
+        incident_id: Incident UUID.
+
+    Returns:
+        Full incident dict.
+    """
+    incident = _incidents.get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+    return incident.model_dump()
+
+
+@app.post("/api/v1/incidents/{incident_id}/analyze")
+async def analyze_incident(incident_id: str) -> Dict[str, Any]:
+    """Run the full AI analysis pipeline on an incident.
+
+    Args:
+        incident_id: Incident UUID.
+
+    Returns:
+        Enriched incident dict with root cause analysis.
+    """
+    incident = _incidents.get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+
+    # Get cluster state for context
+    client = get_k8s_client()
+    cluster_state = client.get_cluster_state()
+
+    # Run detectors to get correlation signals
+    all_detections = []
+    for detector in DETECTORS:
+        try:
+            results = detector.detect(cluster_state)
+            all_detections.extend(results)
+        except Exception as exc:
+            logger.error("Detector %s failed: %s", detector.name, exc)
+
+    # Correlate signals
+    correlation = _correlator.correlate(
+        all_detections, cluster_state, incident.raw_signals
+    )
+
+    # Build KB + memory context for enhanced RCA
+    kb_context = _context_builder.build_kb_context(incident)
+    memory_context = None
+    similar = _context_builder.retrieve_similar(incident)
+    similar_structured = _context_builder.retrieve_similar_structured(incident)
+    if similar_structured:
+        from knowledge.learning import ContextBuilder as _CB
+        memory_context = _CB._format_memory_context(similar_structured)
+
+    # Get cluster-specific patterns
+    cluster_name = incident.cluster_context or "default"
+    cluster_patterns = _store.get_cluster_patterns(cluster_name)
+
+    # Run RCA with full context
+    enriched = _rca_engine.analyze(
+        incident=incident,
+        correlation=correlation,
+        cluster_state=cluster_state,
+        similar_incidents=similar,
+        kb_context=kb_context,
+        memory_context=memory_context,
+        cluster_patterns=cluster_patterns,
+    )
+
+    # Persist
+    _incidents[incident_id] = enriched
+    _store.save_incident(enriched)
+
+    return enriched.model_dump()
+
+
+@app.get("/api/v1/incidents/{incident_id}/remediation")
+async def get_remediation(incident_id: str) -> Dict[str, Any]:
+    """Get the remediation plan for an incident, generating one if needed.
+
+    Args:
+        incident_id: Incident UUID.
+
+    Returns:
+        RemediationPlan dict.
+    """
+    incident = _incidents.get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+
+    # Check if plan already exists
+    existing_plan = next(
+        (p for p in _plans.values() if p.incident_id == incident_id), None
+    )
+    if existing_plan:
+        return existing_plan.model_dump()
+
+    # Generate new plan
+    plan = _rem_engine.generate_plan(incident)
+    _plans[plan.id] = plan
+    return plan.model_dump()
+
+
+@app.post("/api/v1/incidents/{incident_id}/remediation/execute")
+async def execute_remediation(
+    incident_id: str,
+    dry_run: bool = Query(True),
+) -> Dict[str, Any]:
+    """Execute the remediation plan for an incident.
+
+    Args:
+        incident_id: Incident UUID.
+        dry_run: If True, simulate without making real changes.
+
+    Returns:
+        Execution result dict.
+    """
+    incident = _incidents.get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+
+    plan = next((p for p in _plans.values() if p.incident_id == incident_id), None)
+    if not plan:
+        raise HTTPException(status_code=404, detail="No remediation plan found. Call GET /remediation first.")
+
+    if plan.requires_approval and plan.status != RemediationStatus.approved:
+        raise HTTPException(
+            status_code=403,
+            detail="This plan requires approval before execution. POST to /remediation/approve first.",
+        )
+
+    executed_steps = []
+    outputs = []
+
+    for step in plan.steps:
+        allowed, reason = _guardrails.validate(step, incident.namespace, incident.workload)
+        if not allowed:
+            outputs.append(f"STEP {step.order} BLOCKED: {reason}")
+            continue
+
+        if dry_run:
+            output = f"DRY RUN step {step.order}: {step.action}"
+            if step.command:
+                output += f"\n  $ {step.command}"
+        else:
+            output = f"EXECUTED step {step.order}: {step.action}"
+
+        executed_steps.append(step.action)
+        outputs.append(output)
+
+    plan.status = RemediationStatus.completed if not dry_run else RemediationStatus.pending
+    plan.executed_at = datetime.utcnow().isoformat()
+    plan.outcome = "\n".join(outputs)
+
+    return {
+        "plan_id": plan.id,
+        "incident_id": incident_id,
+        "dry_run": dry_run,
+        "executed_steps": executed_steps,
+        "output": "\n".join(outputs),
+        "success": True,
+    }
+
+
+@app.post("/api/v1/incidents/{incident_id}/remediation/approve")
+async def approve_remediation(incident_id: str) -> Dict[str, Any]:
+    """Approve a Level 2 remediation plan for execution.
+
+    Args:
+        incident_id: Incident UUID.
+
+    Returns:
+        Updated plan status dict.
+    """
+    plan = next((p for p in _plans.values() if p.incident_id == incident_id), None)
+    if not plan:
+        raise HTTPException(status_code=404, detail="No remediation plan found.")
+
+    plan.status = RemediationStatus.approved
+    logger.info("Remediation plan approved: %s", plan.id)
+    return {"plan_id": plan.id, "status": "approved", "message": "Plan approved. Now call /execute."}
+
+
+@app.get("/api/v1/incidents/{incident_id}/similar")
+async def get_similar(incident_id: str) -> List[Dict[str, Any]]:
+    """Retrieve similar past incidents from the knowledge base.
+
+    Args:
+        incident_id: Incident UUID.
+
+    Returns:
+        List of similar incident summary dicts.
+    """
+    incident = _incidents.get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+    return _context_builder.retrieve_similar(incident)
+
+
+@app.post("/api/v1/feedback")
+async def submit_feedback(req: FeedbackRequest) -> Dict[str, Any]:
+    """Submit operator feedback on remediation outcome.
+
+    Args:
+        req: Feedback payload.
+
+    Returns:
+        Acknowledgment dict.
+    """
+    _store.save_remediation_outcome(
+        incident_id=req.incident_id,
+        plan_summary=req.plan_summary,
+        success=req.success,
+        feedback_notes=req.notes,
+    )
+    # Update feedback score and trigger learning loop
+    _store.update_feedback(req.incident_id, req.success, req.notes)
+    _learning_loop.on_feedback(
+        incident_id=req.incident_id,
+        success=req.success,
+        operator_notes=req.notes,
+    )
+    return {"status": "recorded", "incident_id": req.incident_id, "success": req.success}
+
+
+# ---------------------------------------------------------------------------
+# Knowledge base endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/knowledge/failures")
+async def list_failure_patterns(tag: Optional[str] = Query(None)) -> List[Dict[str, Any]]:
+    """List all knowledge base failure patterns with optional tag filter.
+
+    Args:
+        tag: Optional tag to filter patterns (e.g., 'crashloop', 'networking').
+
+    Returns:
+        List of failure pattern dicts.
+    """
+    if tag:
+        patterns = _kb.list_by_tag(tag)
+    else:
+        patterns = _kb.list_all()
+    return [
+        {
+            "id": p.id,
+            "title": p.title,
+            "scope": p.scope,
+            "root_cause": p.root_cause,
+            "safety_level": p.safety_level,
+            "safe_auto_fix": p.safe_auto_fix,
+            "tags": p.tags,
+            "remediation_steps": p.remediation_steps,
+            "provider": p.provider,
+        }
+        for p in patterns
+    ]
+
+
+@app.get("/api/v1/knowledge/failures/{pattern_id}")
+async def get_failure_pattern(pattern_id: str) -> Dict[str, Any]:
+    """Get a specific failure pattern by ID.
+
+    Args:
+        pattern_id: Pattern ID (e.g., 'k8s-001').
+
+    Returns:
+        Full failure pattern dict.
+    """
+    pattern = _kb.get_by_id(pattern_id)
+    if not pattern:
+        raise HTTPException(status_code=404, detail=f"Pattern {pattern_id} not found")
+    return {
+        "id": pattern.id,
+        "title": pattern.title,
+        "scope": pattern.scope,
+        "symptoms": pattern.symptoms,
+        "event_patterns": pattern.event_patterns,
+        "log_patterns": pattern.log_patterns,
+        "root_cause": pattern.root_cause,
+        "remediation_steps": pattern.remediation_steps,
+        "safety_level": pattern.safety_level,
+        "safe_auto_fix": pattern.safe_auto_fix,
+        "tags": pattern.tags,
+        "confidence_hints": pattern.confidence_hints,
+        "provider": pattern.provider,
+    }
+
+
+@app.get("/api/v1/knowledge/search")
+async def search_knowledge_base(
+    q: str = Query(..., description="Search query text"),
+    provider: str = Query("generic", description="Cloud provider filter: generic/aws/azure/gcp"),
+    top_k: int = Query(5, le=20),
+) -> List[Dict[str, Any]]:
+    """Search the knowledge base for matching failure patterns.
+
+    Args:
+        q: Search query text from incident signals.
+        provider: Cloud provider context for boosting provider-specific patterns.
+        top_k: Number of top matches to return.
+
+    Returns:
+        List of matching failure pattern dicts with scores.
+    """
+    results = _kb.search(q, provider=provider, top_k=top_k)
+    return [
+        {
+            "id": p.id,
+            "title": p.title,
+            "score": p.score,
+            "root_cause": p.root_cause,
+            "safety_level": p.safety_level,
+            "tags": p.tags,
+            "remediation_steps": p.remediation_steps[:3],
+        }
+        for p in results
+    ]
+
+
+@app.get("/api/v1/stats/accuracy")
+async def get_accuracy_stats() -> Dict[str, Any]:
+    """Get RCA accuracy and fix success statistics.
+
+    Returns:
+        Stats dict with total_analyzed, correct_rca_pct, fix_success_pct, top_failure_types.
+    """
+    return _feedback_store.get_accuracy_stats()
+
+
+@app.get("/api/v1/stats/learning")
+async def get_learning_stats() -> Dict[str, Any]:
+    """Get learning system statistics.
+
+    Returns:
+        Dict with learned pattern counts, refit status, feedback totals.
+    """
+    return _learning_loop.get_learning_stats()
+
+
+class StructuredFeedbackRequest(BaseModel):
+    """Structured operator feedback with RCA correctness and better remediation."""
+
+    incident_id: str
+    correct_root_cause: bool = True
+    fix_worked: bool = True
+    operator_notes: str = ""
+    better_remediation: Optional[str] = None
+
+
+@app.post("/api/v1/feedback/structured")
+async def submit_structured_feedback(req: StructuredFeedbackRequest) -> Dict[str, Any]:
+    """Submit structured feedback that feeds into the learning loop.
+
+    This endpoint captures:
+    - Whether the AI root cause was correct
+    - Whether the suggested fix worked
+    - An operator-provided better remediation (if any)
+
+    The learning loop uses this to:
+    - Boost/penalize similar incident retrieval scores
+    - Promote successful patterns into the learned knowledge base
+    - Capture better remediations for future suggestions
+
+    Args:
+        req: Structured feedback payload.
+
+    Returns:
+        Acknowledgment with learning stats.
+    """
+    _learning_loop.on_feedback(
+        incident_id=req.incident_id,
+        success=req.fix_worked,
+        correct_root_cause=req.correct_root_cause,
+        better_remediation=req.better_remediation,
+        operator_notes=req.operator_notes,
+    )
+    _feedback_store.submit_feedback(
+        incident_id=req.incident_id,
+        correct_root_cause=req.correct_root_cause,
+        fix_worked=req.fix_worked,
+        operator_notes=req.operator_notes,
+        better_remediation=req.better_remediation,
+    )
+    return {
+        "status": "recorded",
+        "incident_id": req.incident_id,
+        "learning_stats": _learning_loop.get_learning_stats(),
+    }
+
+
+@app.get("/api/v1/cluster/patterns")
+async def get_cluster_patterns(
+    cluster_name: str = Query("default", description="Cluster name identifier"),
+    limit: int = Query(10, le=50),
+) -> List[Dict[str, Any]]:
+    """Get recurring failure type patterns for a specific cluster.
+
+    Args:
+        cluster_name: Cluster identifier string.
+        limit: Maximum number of pattern entries to return.
+
+    Returns:
+        List of dicts with incident_type and count.
+    """
+    return _store.get_cluster_patterns(cluster_name, limit=limit)
+
+
+@app.post("/api/v1/scan", response_model=ScanResponse)
+async def scan_cluster(namespace: Optional[str] = Query(None)) -> ScanResponse:
+    """Trigger a full cluster scan running all detectors.
+
+    Args:
+        namespace: Optional namespace filter.
+
+    Returns:
+        ScanResponse with detection counts and created incident IDs.
+    """
+    client = get_k8s_client()
+    cluster_state = client.get_cluster_state()
+
+    all_detections = []
+    for detector in DETECTORS:
+        try:
+            results = detector.detect(cluster_state)
+            if namespace:
+                results = [r for r in results if r.namespace == namespace]
+            all_detections.extend(results)
+        except Exception as exc:
+            logger.error("Detector %s failed: %s", detector.name, exc)
+
+    created_ids = []
+    for det in all_detections:
+        # Create incident from detection
+        try:
+            inc_type = IncidentType(det.incident_type)
+        except ValueError:
+            inc_type = IncidentType.unknown
+
+        try:
+            sev = Severity(det.severity)
+        except ValueError:
+            sev = Severity.medium
+
+        incident = Incident(
+            title=f"{det.incident_type}: {det.affected_resource}",
+            incident_type=inc_type,
+            severity=sev,
+            namespace=det.namespace,
+            workload=det.workload,
+            pod_name=det.pod_name or None,
+            evidence=det.evidence,
+            raw_signals=det.raw_signals,
+            provider_used="kubernetes",
+        )
+        _incidents[incident.id] = incident
+        _store.save_incident(incident)
+        created_ids.append(incident.id)
+
+    return ScanResponse(
+        scanned_at=datetime.utcnow().isoformat(),
+        total_detections=len(all_detections),
+        incidents_created=len(created_ids),
+        incident_ids=created_ids,
+    )
+
+
+@app.get("/api/v1/cluster/summary")
+async def cluster_summary() -> Dict[str, Any]:
+    """Get current cluster health summary.
+
+    Returns:
+        ClusterHealthSummary dict.
+    """
+    client = get_k8s_client()
+    state = client.get_cluster_state()
+
+    pods = state.get("pods", [])
+    nodes = state.get("nodes", [])
+    deployments = state.get("deployments", [])
+    pvcs = state.get("pvcs", [])
+
+    total_pods = len(pods)
+    running = sum(1 for p in pods if p.get("phase") == "Running")
+    pending = sum(1 for p in pods if p.get("phase") == "Pending")
+    failed = sum(1 for p in pods if p.get("phase") == "Failed")
+    crashloop = sum(
+        1 for p in pods
+        for cs in p.get("container_statuses", [])
+        if cs.get("state", {}).get("waiting", {}).get("reason") == "CrashLoopBackOff"
+    )
+
+    total_nodes = len(nodes)
+    ready_nodes = sum(1 for n in nodes if n.get("ready", True))
+
+    total_dep = len(deployments)
+    available_dep = sum(1 for d in deployments if d.get("availableReplicas", 0) > 0)
+
+    total_pvc = len(pvcs)
+    bound_pvc = sum(1 for p in pvcs if p.get("phase") == "Bound")
+
+    active_incidents = sum(
+        1 for i in _incidents.values()
+        if i.status not in (IncidentStatus.resolved, IncidentStatus.closed)
+    )
+
+    # Health score: reduce by issues found
+    score = 100.0
+    if total_pods > 0:
+        score -= (crashloop / total_pods) * 30
+        score -= (pending / total_pods) * 20
+        score -= (failed / total_pods) * 30
+    if total_nodes > 0 and ready_nodes < total_nodes:
+        score -= 20
+    score = max(0.0, min(100.0, score))
+
+    summary = ClusterHealthSummary(
+        total_nodes=total_nodes,
+        ready_nodes=ready_nodes,
+        total_pods=total_pods,
+        running_pods=running,
+        pending_pods=pending,
+        failed_pods=failed,
+        crashloop_pods=crashloop,
+        total_deployments=total_dep,
+        available_deployments=available_dep,
+        total_pvcs=total_pvc,
+        bound_pvcs=bound_pvc,
+        active_incidents=active_incidents,
+        health_score=round(score, 1),
+        summary=f"{active_incidents} active incidents, {crashloop} crashlooping pods",
+    )
+    return summary.model_dump()

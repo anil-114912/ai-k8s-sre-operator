@@ -1,0 +1,168 @@
+- id: sec-001
+  title: "RBAC — ServiceAccount forbidden verb on resource"
+  scope: pod
+  symptoms:
+    - "Forbidden error in pod logs"
+    - "is not allowed error"
+    - "RBAC denial events"
+  event_patterns:
+    - "Forbidden"
+    - "is not allowed"
+    - "RBAC"
+  log_patterns:
+    - "forbidden"
+    - "is not allowed"
+    - "cannot get"
+    - "cannot list"
+    - "cannot create"
+    - "RBAC"
+    - "403"
+    - "permissiondenied"
+  metric_patterns: []
+  root_cause: "The pod's ServiceAccount lacks the necessary RBAC Role/ClusterRole permissions to perform the required verb (get/list/create/delete) on the target resource"
+  remediation_steps:
+    - "Check what permissions are denied: kubectl auth can-i <verb> <resource> --as=system:serviceaccount:<namespace>:<sa-name>"
+    - "List existing roles: kubectl get rolebindings,clusterrolebindings -n <namespace> | grep <sa-name>"
+    - "Create a Role with required permissions and bind it to the ServiceAccount"
+    - "Example: kubectl create role <name> --verb=get,list,watch --resource=pods -n <namespace>"
+    - "Example: kubectl create rolebinding <name> --role=<role> --serviceaccount=<namespace>:<sa-name> -n <namespace>"
+  confidence_hints:
+    - pattern: "is not allowed"
+      boost: 0.35
+    - pattern: "RBAC"
+      boost: 0.3
+    - pattern: "forbidden"
+      boost: 0.2
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [rbac, security, permissions, serviceaccount]
+
+- id: sec-002
+  title: "RBAC — ServiceAccount does not exist"
+  scope: pod
+  symptoms:
+    - "ServiceAccount not found error"
+    - "Pod cannot be created due to missing SA"
+    - "FailedCreate with service account error"
+  event_patterns:
+    - "serviceaccount .* not found"
+    - "Error creating"
+    - "service account"
+  log_patterns:
+    - "serviceaccount not found"
+    - "service account .* does not exist"
+  metric_patterns: []
+  root_cause: "The Deployment/Pod spec references a ServiceAccount that does not exist in the namespace — the SA was deleted or never created"
+  remediation_steps:
+    - "Check the missing SA name: kubectl describe pod <name> -n <namespace> | grep ServiceAccount"
+    - "Create the missing ServiceAccount: kubectl create serviceaccount <sa-name> -n <namespace>"
+    - "If SA requires specific RBAC: create Role and RoleBinding for the SA"
+    - "Restart deployment: kubectl rollout restart deployment/<name> -n <namespace>"
+  confidence_hints:
+    - pattern: "serviceaccount .* not found"
+      boost: 0.45
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [rbac, security, serviceaccount, permissions]
+
+- id: sec-003
+  title: "Pod Security Admission denied"
+  scope: pod
+  symptoms:
+    - "Pod creation blocked by Pod Security Admission"
+    - "violates PodSecurity policy"
+    - "FailedCreate with policy violation message"
+  event_patterns:
+    - "violates PodSecurity"
+    - "Pod Security Admission"
+    - "restricted"
+    - "baseline"
+  log_patterns:
+    - "pod security"
+    - "security policy"
+    - "admission denied"
+    - "violates"
+  metric_patterns: []
+  root_cause: "The pod spec violates the Pod Security Admission policy applied to the namespace — common violations include running as root, privileged containers, host network/PID/IPC sharing"
+  remediation_steps:
+    - "Check namespace PSA label: kubectl get namespace <name> -o yaml | grep pod-security"
+    - "Review violation details: kubectl describe events -n <namespace> | grep -A5 violates"
+    - "Fix pod spec to comply with policy (drop capabilities, set runAsNonRoot, seccompProfile, etc.)"
+    - "Common fixes: add securityContext.runAsNonRoot=true, drop ALL capabilities, set readOnlyRootFilesystem"
+    - "If policy is too strict: relax namespace label from 'restricted' to 'baseline' (with team approval)"
+  confidence_hints:
+    - pattern: "violates PodSecurity"
+      boost: 0.45
+    - pattern: "pod security"
+      boost: 0.25
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [security, pod-security, psa, admission, policy]
+
+- id: sec-004
+  title: "Seccomp profile missing or invalid"
+  scope: pod
+  symptoms:
+    - "Seccomp profile not found"
+    - "Pod stuck in ContainerCreating with seccomp error"
+    - "Syscall denied by seccomp filter"
+  event_patterns:
+    - "seccomp"
+    - "profile not found"
+    - "SecurityContext"
+  log_patterns:
+    - "seccomp"
+    - "syscall denied"
+    - "operation not permitted"
+    - "seccomp profile"
+  metric_patterns: []
+  root_cause: "The pod references a seccomp profile that does not exist on the node, or a custom seccomp profile is blocking required syscalls causing the application to fail"
+  remediation_steps:
+    - "Check seccomp profile in pod spec: kubectl get pod <name> -n <namespace> -o yaml | grep seccomp"
+    - "List available profiles on node: ssh to node and ls /var/lib/kubelet/seccomp/"
+    - "Deploy missing custom profile via DaemonSet or node configuration"
+    - "Use RuntimeDefault profile if custom profile is not needed: seccompProfile.type: RuntimeDefault"
+    - "Audit which syscalls are blocked: use audit mode first before enforcing"
+  confidence_hints:
+    - pattern: "seccomp"
+      boost: 0.4
+    - pattern: "profile not found"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [security, seccomp, syscall, policy, pod]
+
+- id: sec-005
+  title: "Container image not signed or signature verification failed"
+  scope: pod
+  symptoms:
+    - "Image admission webhook denied"
+    - "Signature verification failed"
+    - "Image not signed by trusted authority"
+  event_patterns:
+    - "image not signed"
+    - "signature verification"
+    - "admission webhook"
+    - "policy violation"
+  log_patterns:
+    - "image not signed"
+    - "signature verification failed"
+    - "untrusted image"
+    - "cosign"
+    - "notary"
+  metric_patterns: []
+  root_cause: "An image admission policy (Cosign, Notary, Kyverno, OPA Gatekeeper) is blocking pod creation because the container image lacks a valid cryptographic signature from a trusted authority"
+  remediation_steps:
+    - "Check admission webhook policy: kubectl get clusterpolicy or kubectl get constraint"
+    - "Sign the image using Cosign: cosign sign --key cosign.key <image>:<tag>"
+    - "Verify signature: cosign verify --key cosign.pub <image>:<tag>"
+    - "Or update policy to allow exception for the specific registry/image"
+    - "Review Kyverno/OPA Gatekeeper policies for image signing requirements"
+  confidence_hints:
+    - pattern: "signature verification"
+      boost: 0.4
+    - pattern: "image not signed"
+      boost: 0.4
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [security, image-signing, cosign, notary, admission, supply-chain]

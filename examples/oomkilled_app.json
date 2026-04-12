@@ -1,0 +1,64 @@
+{
+  "id": "inc-002",
+  "title": "OOMKilled: analytics-worker memory limit exceeded",
+  "incident_type": "OOMKilled",
+  "severity": "high",
+  "namespace": "production",
+  "workload": "analytics-worker",
+  "pod_name": "analytics-worker-8bf7c-p9qrs",
+  "container_name": "analytics-worker",
+  "provider_used": "simulation",
+  "raw_signals": {
+    "restart_count": 7,
+    "phase": "Running",
+    "container_state": {
+      "running": {"startedAt": "2024-01-15T09:00:12Z"}
+    },
+    "last_terminated": {
+      "reason": "OOMKilled",
+      "exitCode": 137,
+      "finishedAt": "2024-01-15T08:57:35Z"
+    },
+    "container_resources": {
+      "limits": {"memory": "256Mi", "cpu": "1000m"},
+      "requests": {"memory": "128Mi", "cpu": "500m"}
+    },
+    "events": [
+      {
+        "reason": "OOMKilling",
+        "message": "Memory cgroup out of memory: Kill process 8823 (python3) score 999 or sacrifice child",
+        "count": 7,
+        "firstTime": "2024-01-15T07:30:00Z",
+        "lastTime": "2024-01-15T08:57:35Z"
+      },
+      {
+        "reason": "BackOff",
+        "message": "Back-off restarting failed container",
+        "count": 6,
+        "firstTime": "2024-01-15T07:32:00Z",
+        "lastTime": "2024-01-15T09:00:00Z"
+      }
+    ],
+    "recent_logs": [
+      "2024-01-15T08:55:12Z INFO  Processing batch job batch_id=2024011534",
+      "2024-01-15T08:55:45Z INFO  Loading dataset: 45GB parquet file from s3://data-lake/raw/2024-01-15/",
+      "2024-01-15T08:56:30Z INFO  Dataset loaded. Records: 12,450,000. Starting transformation pipeline.",
+      "2024-01-15T08:57:01Z INFO  Transformation 60% complete. Memory: 198MB",
+      "2024-01-15T08:57:23Z WARN  Memory usage at 89% (229MB/256MB limit) — consider reducing batch size",
+      "2024-01-15T08:57:31Z WARN  Memory usage at 97% (248MB/256MB limit) — critical threshold",
+      "2024-01-15T08:57:35Z ERROR Killed by OOM killer (signal 9)"
+    ],
+    "recent_changes": [
+      {
+        "type": "ConfigChange",
+        "message": "analytics-worker job configuration updated: batch_size increased from 500000 to 2000000",
+        "timestamp": "2024-01-15T06:00:00Z"
+      },
+      {
+        "type": "Deployment",
+        "message": "Deployed analytics-worker v3.2.1 (new dataset format support)",
+        "timestamp": "2024-01-14T18:00:00Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "id": "inc-004",
+  "title": "IngressFailure: staging-ingress backend 'missing-backend' not found",
+  "incident_type": "IngressFailure",
+  "severity": "high",
+  "namespace": "staging",
+  "workload": "staging-ingress",
+  "pod_name": null,
+  "container_name": null,
+  "provider_used": "simulation",
+  "raw_signals": {
+    "host": "staging.example.com",
+    "service": "missing-backend",
+    "port": 8080,
+    "error": "service_not_found",
+    "ingress_rules": [
+      {
+        "host": "staging.example.com",
+        "path": "/",
+        "backend_service": "missing-backend",
+        "backend_port": 8080
+      }
+    ],
+    "available_services": [
+      "checkout-service",
+      "cart-service",
+      "user-service"
+    ],
+    "events": [
+      {
+        "reason": "ServiceNotFound",
+        "message": "Service 'missing-backend' referenced in Ingress 'staging-ingress' not found in namespace 'staging'",
+        "count": 1,
+        "firstTime": "2024-01-15T08:00:00Z",
+        "lastTime": "2024-01-15T09:20:00Z"
+      }
+    ],
+    "recent_changes": [
+      {
+        "type": "IngressUpdate",
+        "message": "staging-ingress backend updated from 'checkout-service' to 'missing-backend'",
+        "timestamp": "2024-01-15T08:00:00Z"
+      },
+      {
+        "type": "ServiceDeleted",
+        "message": "Service 'backend-v1' deleted from namespace 'staging'",
+        "timestamp": "2024-01-15T07:55:00Z"
+      }
+    ]
+  }
+}

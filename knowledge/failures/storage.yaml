@@ -1,0 +1,187 @@
+- id: stor-001
+  title: "PVC not bound — provisioner failure"
+  scope: pvc
+  symptoms:
+    - "PVC phase: Pending"
+    - "No ProvisioningSucceeded event"
+    - "StorageClass provisioner error"
+  event_patterns:
+    - "ProvisioningFailed"
+    - "failed to provision"
+    - "provisioner"
+  log_patterns:
+    - "failed to provision"
+    - "provisioner not found"
+    - "storage class not found"
+  metric_patterns: []
+  root_cause: "The PVC cannot be bound because the dynamic storage provisioner failed — the StorageClass provisioner pod is unhealthy, cloud storage quota is exhausted, or the StorageClass does not exist"
+  remediation_steps:
+    - "Check PVC status: kubectl describe pvc <name> -n <namespace>"
+    - "Verify StorageClass exists: kubectl get storageclass"
+    - "Check provisioner pod health: kubectl get pods -n kube-system | grep provisioner"
+    - "View provisioner logs for error details"
+    - "Check cloud storage quotas (AWS EBS, Azure Disk, GCP PD)"
+    - "If static provisioning: create a PV manually that matches PVC requirements"
+  confidence_hints:
+    - pattern: "ProvisioningFailed"
+      boost: 0.35
+    - pattern: "failed to provision"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [pvc, storage, provisioner, storageclass]
+
+- id: stor-002
+  title: "PVC mount failure — FailedMount event"
+  scope: pod
+  symptoms:
+    - "Pod stuck in ContainerCreating"
+    - "FailedMount event"
+    - "Unable to attach or mount volumes"
+  event_patterns:
+    - "FailedMount"
+    - "unable to attach or mount"
+    - "timed out waiting"
+    - "volume attachment"
+  log_patterns:
+    - "failed to mount"
+    - "mount failed"
+    - "volume mount error"
+  metric_patterns: []
+  root_cause: "The pod cannot start because a volume cannot be mounted — the PVC may be already attached to another node (ReadWriteOnce), the underlying storage device is not reachable, or the CSI driver is failing"
+  remediation_steps:
+    - "Check FailedMount event: kubectl describe pod <name> -n <namespace>"
+    - "Check PVC attachment: kubectl get volumeattachment"
+    - "Force detach from old node if stuck: kubectl delete volumeattachment <name>"
+    - "Check CSI driver pods: kubectl get pods -n kube-system | grep csi"
+    - "For ReadWriteOnce: ensure old pod is fully terminated before new pod starts"
+  confidence_hints:
+    - pattern: "FailedMount"
+      boost: 0.4
+    - pattern: "unable to attach or mount"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [pvc, storage, mount, csi, volume]
+
+- id: stor-003
+  title: "CSI driver not installed or not ready"
+  scope: cluster
+  symptoms:
+    - "CSI driver not found error"
+    - "volume.kubernetes.io/storage-provisioner shows missing driver"
+    - "PVC Pending with CSI error"
+  event_patterns:
+    - "csi driver"
+    - "driver not found"
+    - "volume plugin not found"
+  log_patterns:
+    - "csi driver not found"
+    - "plugin not found"
+    - "driver not registered"
+  metric_patterns: []
+  root_cause: "The required CSI (Container Storage Interface) driver is not installed in the cluster, or the CSI driver DaemonSet/Deployment pods are unhealthy"
+  remediation_steps:
+    - "List installed CSI drivers: kubectl get csidrivers"
+    - "Check if required CSI driver is present for the StorageClass"
+    - "Check CSI driver pod health: kubectl get pods -n kube-system | grep csi"
+    - "Install missing CSI driver via Helm or manifests (e.g., aws-ebs-csi-driver, azure-disk-csi)"
+    - "Verify CSI driver version compatibility with cluster version"
+  confidence_hints:
+    - pattern: "csi driver not found"
+      boost: 0.4
+    - pattern: "driver not registered"
+      boost: 0.35
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [csi, storage, driver, provisioner]
+
+- id: stor-004
+  title: "StorageClass missing or deleted"
+  scope: pvc
+  symptoms:
+    - "PVC Pending with 'storageclass not found'"
+    - "StorageClass name in PVC does not exist"
+  event_patterns:
+    - "storageclass not found"
+    - "storage class not found"
+    - "no StorageClass"
+  log_patterns:
+    - "storageclass not found"
+    - "storage class not found"
+  metric_patterns: []
+  root_cause: "The PVC references a StorageClass that has been deleted or never existed — the provisioner cannot create a PV without a valid StorageClass configuration"
+  remediation_steps:
+    - "List StorageClasses: kubectl get storageclass"
+    - "Check PVC storageClassName: kubectl get pvc <name> -n <namespace> -o yaml"
+    - "Recreate the StorageClass with the correct provisioner and parameters"
+    - "Or update PVC to use an existing StorageClass (requires deleting and recreating PVC)"
+  confidence_hints:
+    - pattern: "storageclass not found"
+      boost: 0.45
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [storageclass, storage, pvc, provisioner]
+
+- id: stor-005
+  title: "PV capacity exceeded or wrong access mode"
+  scope: pvc
+  symptoms:
+    - "PVC Pending with no matching PV"
+    - "Requested storage > available PV size"
+    - "Access mode not supported"
+  event_patterns:
+    - "no persistent volumes available"
+    - "access mode"
+    - "insufficient size"
+  log_patterns:
+    - "no persistent volumes available"
+    - "insufficient capacity"
+  metric_patterns: []
+  root_cause: "No available PersistentVolume matches the PVC's requirements — requested capacity exceeds available PVs, access mode is not supported, or no PV exists with matching storage class"
+  remediation_steps:
+    - "List available PVs: kubectl get pv"
+    - "Check PVC requirements: kubectl describe pvc <name> -n <namespace>"
+    - "Create a PV that matches the PVC (for static provisioning)"
+    - "For dynamic provisioning: verify StorageClass supports requested access mode"
+    - "Common issue: ReadWriteMany is not supported by most block storage providers (use NFS/CephFS)"
+  confidence_hints:
+    - pattern: "no persistent volumes available"
+      boost: 0.35
+    - pattern: "access mode"
+      boost: 0.2
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [pvc, pv, storage, access-mode, capacity]
+
+- id: stor-006
+  title: "Volume node affinity conflict"
+  scope: pod
+  symptoms:
+    - "Pod cannot be scheduled due to volume node affinity"
+    - "VolumeNodeAffinity required"
+    - "Pod stuck in Pending with volume topology error"
+  event_patterns:
+    - "VolumeNodeAffinity"
+    - "volume topology"
+    - "node affinity conflict"
+    - "no nodes match"
+  log_patterns:
+    - "volume node affinity"
+    - "topology constraint"
+  metric_patterns: []
+  root_cause: "The PersistentVolume has node affinity rules (topology constraints) that conflict with the pod's scheduling requirements — the volume is in a different AZ or region than where the pod can run"
+  remediation_steps:
+    - "Check PV node affinity: kubectl get pv <name> -o yaml | grep -A10 nodeAffinity"
+    - "Check pod scheduling constraints: kubectl describe pod <name> -n <namespace>"
+    - "Move pod to same availability zone as the volume"
+    - "Or migrate data to a new volume in the correct zone"
+    - "For AWS: use EBS volumes in same AZ as pod, or use EFS for cross-AZ access"
+  confidence_hints:
+    - pattern: "VolumeNodeAffinity"
+      boost: 0.45
+    - pattern: "volume topology"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [pvc, pv, storage, affinity, topology, scheduling]

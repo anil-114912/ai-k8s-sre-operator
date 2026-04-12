@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ai-k8s-sre-operator.fullname" . }}-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ai-k8s-sre-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.replicaCount.worker }}
+  selector:
+    matchLabels:
+      {{- include "ai-k8s-sre-operator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "ai-k8s-sre-operator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      serviceAccountName: {{ include "ai-k8s-sre-operator.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python3", "-c", "from collectors.k8s_watcher import K8sWatcher; K8sWatcher().start(); import time; time.sleep(float('inf'))"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "ai-k8s-sre-operator.fullname" . }}-config
+          env:
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ if .Values.llm.existingSecret }}{{ .Values.llm.existingSecret }}{{ else }}{{ include "ai-k8s-sre-operator.fullname" . }}-secrets{{ end }}
+                  key: LLM_API_KEY
+                  optional: true
+          resources:
+            {{- toYaml .Values.resources.worker | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+          {{- end }}
+      {{- if .Values.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "ai-k8s-sre-operator.fullname" . }}-data
+      {{- end }}

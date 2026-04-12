@@ -1,0 +1,110 @@
+- id: aks-001
+  title: "AKS node pool capacity — VM quota exceeded"
+  scope: cluster
+  symptoms:
+    - "Node pool scale-up fails"
+    - "Azure VM quota exceeded error"
+    - "Pods stuck Pending"
+    - "Failed to provision new VMs"
+  event_patterns:
+    - "quota exceeded"
+    - "QuotaExceeded"
+    - "VM size quota"
+    - "insufficient capacity"
+  log_patterns:
+    - "quota exceeded"
+    - "vm quota"
+    - "azure vm"
+    - "insufficient capacity"
+    - "subscription limit"
+  metric_patterns: []
+  root_cause: "The AKS node pool cluster-autoscaler cannot provision new VMs because the Azure subscription has hit the vCPU quota limit for the selected VM size family in the target region"
+  remediation_steps:
+    - "Check cluster-autoscaler logs: kubectl logs -n kube-system -l app=cluster-autoscaler"
+    - "View Azure VM quota: az vm list-usage --location <region> -o table"
+    - "Request quota increase in Azure Portal: Subscriptions > Usage + Quotas > Request Increase"
+    - "Switch to a different VM size that has available quota: az aks nodepool update --resource-group <rg> --cluster-name <cluster> --name <nodepool> --vm-size <new-vm-size>"
+    - "Enable Spot instances for non-critical workloads"
+  confidence_hints:
+    - pattern: "QuotaExceeded"
+      boost: 0.45
+    - pattern: "vm quota"
+      boost: 0.35
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [aks, azure, node-pool, quota, capacity, vm]
+  provider: azure
+
+- id: aks-002
+  title: "AKS Managed Identity missing permissions"
+  scope: pod
+  symptoms:
+    - "Azure API authentication failures in pods"
+    - "Managed identity credential error"
+    - "401 Unauthorized from Azure services"
+  event_patterns:
+    - "managed identity"
+    - "authorization failed"
+    - "IMDS"
+  log_patterns:
+    - "managed identity"
+    - "msi credential"
+    - "401 unauthorized"
+    - "access denied"
+    - "authentication failed"
+    - "imds"
+    - "azure.BearerAuthorizer"
+  metric_patterns: []
+  root_cause: "The pod's workload identity or managed identity does not have the required Azure RBAC role assignments to access the target Azure resource (Key Vault, Storage, etc.)"
+  remediation_steps:
+    - "Check pod identity annotation: kubectl get sa <name> -n <namespace> -o yaml | grep azure"
+    - "Verify workload identity federation: az identity federated-credential list --identity-name <name> --resource-group <rg>"
+    - "Assign required Azure role: az role assignment create --assignee <client-id> --role <role-name> --scope <resource-scope>"
+    - "For AKS Workload Identity: verify azwi mutating webhook is installed"
+    - "Test identity: kubectl exec <pod> -- curl -H 'Metadata: true' 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/'"
+  confidence_hints:
+    - pattern: "managed identity"
+      boost: 0.4
+    - pattern: "401 unauthorized"
+      boost: 0.25
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [aks, azure, managed-identity, workload-identity, rbac, permissions]
+  provider: azure
+
+- id: aks-003
+  title: "AKS Azure Disk volume attach failure"
+  scope: pod
+  symptoms:
+    - "FailedAttachVolume event for Azure Disk"
+    - "Pod stuck in ContainerCreating"
+    - "Azure Disk cannot be attached to different node"
+  event_patterns:
+    - "FailedAttachVolume"
+    - "Azure Disk"
+    - "WaitForAttach"
+    - "disk"
+  log_patterns:
+    - "azure disk"
+    - "disk attach failed"
+    - "failed to attach volume"
+    - "disk cannot be attached"
+    - "azure disk attach error"
+  metric_patterns: []
+  root_cause: "An Azure Disk (ReadWriteOnce PVC) is stuck attached to a different node than where the pod is being scheduled, or the disk detach from the previous node failed"
+  remediation_steps:
+    - "Identify stuck VolumeAttachment: kubectl get volumeattachment | grep <pv-name>"
+    - "Delete stuck VolumeAttachment to force re-attach: kubectl delete volumeattachment <name>"
+    - "Check if old pod is truly terminated: kubectl get pods --all-namespaces | grep Terminating"
+    - "Force delete stuck pod: kubectl delete pod <name> -n <namespace> --force --grace-period=0"
+    - "For multi-node access: switch to Azure Files (ReadWriteMany) instead of Azure Disk"
+    - "Check azure-disk-csi-driver logs: kubectl logs -n kube-system -l app=csi-azuredisk-node"
+  confidence_hints:
+    - pattern: "FailedAttachVolume"
+      boost: 0.4
+    - pattern: "Azure Disk"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [aks, azure, disk, pvc, storage, volume-attach]
+  provider: azure

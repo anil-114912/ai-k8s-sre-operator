@@ -1,0 +1,149 @@
+- id: clust-001
+  title: "ResourceQuota exceeded — pod creation blocked"
+  scope: namespace
+  symptoms:
+    - "FailedCreate event with exceeded quota"
+    - "New pods blocked from starting"
+    - "Namespace resource quota limit hit"
+  event_patterns:
+    - "FailedCreate"
+    - "exceeded quota"
+    - "resource quota"
+    - "forbidden: exceeded quota"
+  log_patterns:
+    - "exceeded quota"
+    - "resource quota"
+    - "quota exceeded"
+  metric_patterns:
+    - "kube_resourcequota_used >= kube_resourcequota_hard"
+  root_cause: "The namespace has hit its ResourceQuota limits — no new pods, services, or other resources can be created until existing resources are deleted or the quota is increased"
+  remediation_steps:
+    - "View quota usage: kubectl describe resourcequota -n <namespace>"
+    - "List resource consuming deployments: kubectl top pods -n <namespace>"
+    - "Delete unused resources to free quota: kubectl delete <resource-type> <name> -n <namespace>"
+    - "Increase quota: kubectl edit resourcequota <name> -n <namespace> (requires cluster admin approval)"
+    - "Set LimitRange to prevent individual pods from consuming too much quota"
+  confidence_hints:
+    - pattern: "exceeded quota"
+      boost: 0.45
+    - pattern: "FailedCreate"
+      boost: 0.2
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [quota, namespace, resources, scheduling, cluster]
+
+- id: clust-002
+  title: "LimitRange violation — pod resource request out of bounds"
+  scope: namespace
+  symptoms:
+    - "Pod creation fails with LimitRange violation"
+    - "min/max resource constraint violated"
+    - "default limits applied unexpectedly"
+  event_patterns:
+    - "LimitRange"
+    - "minimum"
+    - "maximum"
+    - "constraint"
+  log_patterns:
+    - "limitrange"
+    - "limit range"
+    - "minimum memory"
+    - "maximum cpu"
+    - "violates LimitRange"
+  metric_patterns: []
+  root_cause: "The pod's resource requests or limits violate the namespace LimitRange — either below the minimum, above the maximum, or the request-to-limit ratio is incorrect"
+  remediation_steps:
+    - "View LimitRange constraints: kubectl describe limitrange -n <namespace>"
+    - "Update pod resource requests to comply: must be between min and max values"
+    - "Example: if LimitRange min is 100m cpu, ensure pod requests >= 100m"
+    - "To remove LimitRange: kubectl delete limitrange <name> -n <namespace> (requires approval)"
+  confidence_hints:
+    - pattern: "LimitRange"
+      boost: 0.45
+    - pattern: "minimum memory"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: approval_required
+  tags: [limitrange, namespace, resources, cluster, scheduling]
+
+- id: clust-003
+  title: "Node NotReady — kubelet not responding"
+  scope: cluster
+  symptoms:
+    - "Node status NotReady"
+    - "Kubelet heartbeat missing"
+    - "Pods on node stuck in Unknown state"
+    - "NodeNotReady events"
+  event_patterns:
+    - "NodeNotReady"
+    - "NotReady"
+    - "kubelet"
+    - "Taint"
+  log_patterns:
+    - "node not ready"
+    - "kubelet"
+    - "not responding"
+  metric_patterns:
+    - "kube_node_status_condition{condition=Ready,status=true} == 0"
+  root_cause: "The node's kubelet has stopped sending heartbeats to the API server — the node may be experiencing resource pressure, network partition, kernel panic, or the kubelet process itself has crashed"
+  remediation_steps:
+    - "Check node conditions: kubectl describe node <name>"
+    - "SSH to node and check kubelet: systemctl status kubelet"
+    - "View kubelet logs: journalctl -u kubelet -n 100"
+    - "Check node disk/memory: df -h && free -m"
+    - "Restart kubelet if running: systemctl restart kubelet"
+    - "If node is unrecoverable: kubectl drain <node> --ignore-daemonsets --delete-emptydir-data && kubectl delete node <name>"
+    - "Then provision a replacement node"
+  confidence_hints:
+    - pattern: "NodeNotReady"
+      boost: 0.45
+    - pattern: "kubelet"
+      boost: 0.25
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [node, notready, kubelet, cluster, availability]
+
+- id: clust-004
+  title: "etcd slow writes causing API server latency"
+  scope: cluster
+  symptoms:
+    - "API server requests timing out"
+    - "etcd slow write warning events"
+    - "High etcd request latency"
+    - "Cluster control plane slowdown"
+  event_patterns:
+    - "etcd"
+    - "slow"
+    - "timeout"
+    - "request latency"
+  log_patterns:
+    - "etcd"
+    - "slow write"
+    - "database space exceeded"
+    - "request timed out"
+    - "slow fdatasync"
+    - "leader changed"
+    - "heartbeat"
+    - "compaction"
+  metric_patterns:
+    - "etcd_disk_wal_fsync_duration_seconds_bucket{quantile=0.99} > 0.01"
+    - "etcd_disk_backend_commit_duration_seconds_bucket{quantile=0.99} > 0.025"
+  root_cause: "etcd is experiencing slow fsync operations due to disk I/O pressure — typically caused by using HDD instead of SSD, disk contention from other processes, or high etcd object churn"
+  remediation_steps:
+    - "Check etcd disk I/O: iostat -x 1 5 on etcd nodes"
+    - "Monitor etcd metrics: etcd_disk_wal_fsync_duration_seconds"
+    - "Compact etcd to remove old revisions: etcdctl compact $(etcdctl endpoint status --write-out='json' | jq '.[0].Status.header.revision')"
+    - "Defragment etcd: etcdctl defrag"
+    - "Move etcd WAL to dedicated SSD disk"
+    - "Tune etcd quota: ensure etcd db size < 8GB"
+    - "Reduce API server load by optimizing controller manager watch frequency"
+  confidence_hints:
+    - pattern: "etcd"
+      boost: 0.35
+    - pattern: "slow fdatasync"
+      boost: 0.4
+    - pattern: "database space exceeded"
+      boost: 0.4
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [etcd, cluster, control-plane, performance, disk-io]

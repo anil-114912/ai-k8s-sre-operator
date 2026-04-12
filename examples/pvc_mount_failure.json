@@ -1,0 +1,49 @@
+{
+  "id": "inc-005",
+  "title": "PVCFailure: data-pipeline-pvc stuck in Pending (StorageClass not found)",
+  "incident_type": "PVCFailure",
+  "severity": "high",
+  "namespace": "production",
+  "workload": "data-pipeline-pvc",
+  "pod_name": "data-pipeline-6c9f-qrstu",
+  "container_name": null,
+  "provider_used": "simulation",
+  "raw_signals": {
+    "phase": "Pending",
+    "storageClass": "fast-ssd",
+    "requested": "100Gi",
+    "pvc_name": "data-pipeline-pvc",
+    "events": [
+      {
+        "reason": "ProvisioningFailed",
+        "message": "storageclass.storage.k8s.io \"fast-ssd\" not found",
+        "count": 45,
+        "firstTime": "2024-01-15T09:00:00Z",
+        "lastTime": "2024-01-15T09:20:00Z"
+      },
+      {
+        "reason": "FailedMount",
+        "message": "Unable to attach or mount volumes: unmounted volumes=[data-pipeline-storage], unattached volumes=[data-pipeline-storage]: timed out waiting for the condition",
+        "count": 5,
+        "firstTime": "2024-01-15T09:01:00Z",
+        "lastTime": "2024-01-15T09:15:00Z"
+      }
+    ],
+    "available_storage_classes": [
+      {"name": "standard", "provisioner": "kubernetes.io/gce-pd", "default": true},
+      {"name": "premium-rwo", "provisioner": "pd.csi.storage.gke.io"}
+    ],
+    "recent_changes": [
+      {
+        "type": "PVCCreated",
+        "message": "PVC 'data-pipeline-pvc' created with storageClass 'fast-ssd' (non-existent)",
+        "timestamp": "2024-01-15T09:00:00Z"
+      },
+      {
+        "type": "HelmUpgrade",
+        "message": "data-pipeline Helm chart upgraded to v2.0 — added persistent storage with storageClass=fast-ssd",
+        "timestamp": "2024-01-15T08:55:00Z"
+      }
+    ]
+  }
+}
