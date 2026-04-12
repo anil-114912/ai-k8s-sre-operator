@@ -9,7 +9,27 @@ from typing import Any, Dict, List, Optional
 import httpx
 import streamlit as st
 
-API_BASE = os.getenv("API_BASE_URL", "http://localhost:8000")
+# Suppress harmless Tornado WebSocket closed errors during tab switches/refreshes
+import logging
+logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
+
+# Shared httpx client — disable SSL verification for local API calls.
+# The API runs on http://localhost:8000 (plain HTTP) but macOS Python's
+# broken SSL setup can interfere even with HTTP requests in some configs.
+_http_client = httpx.Client(verify=False, timeout=30)
+
+_DEFAULT_API_BASE = "http://localhost:8000"
+
+
+def _get_api_base() -> str:
+    """Return the current API base URL, validated with protocol prefix."""
+    url = st.session_state.get("api_base_url", os.getenv("API_BASE_URL", _DEFAULT_API_BASE))
+    if not url:
+        return _DEFAULT_API_BASE
+    url = url.strip()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = f"http://{url}"
+    return url.rstrip("/")
 
 # ---------------------------------------------------------------------------
 # Page configuration
@@ -29,35 +49,26 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    :root {
-      --bg: #060b18;
-      --surface: #0d1526;
-      --accent: #00d4ff;
-      --green: #00ff88;
-      --red: #ff3366;
-      --yellow: #ffd700;
-      --text: #e0e8ff;
+    /* ── Adaptive theme: works in both light and dark mode ── */
+
+    /* Badge styles — visible on any background */
+    .badge-critical { background: #ff3366; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .badge-high { background: #ff7722; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .badge-medium { background: #e6a800; color: black; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .badge-low { background: #00cc6a; color: black; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .badge-auto_fix { background: #00cc6a; color: black; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 600; }
+    .badge-approval_required { background: #e6a800; color: black; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 600; }
+    .badge-suggest_only { background: #9b59b6; color: white; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 600; }
+
+    /* ── Dark mode overrides (only applied when Streamlit is in dark theme) ── */
+    @media (prefers-color-scheme: dark) {
+        .main .block-container { padding: 1.5rem; }
     }
-    .stApp { background-color: var(--bg); color: var(--text); }
-    .main .block-container { padding: 1.5rem; background: var(--bg); }
-    .stSidebar { background-color: var(--surface); }
-    h1, h2, h3 { color: var(--accent); }
-    .metric-card {
-        background: var(--surface);
-        border: 1px solid var(--accent);
-        border-radius: 8px;
-        padding: 16px;
-        margin: 8px 0;
+
+    /* Streamlit dark theme detection via data attribute */
+    [data-testid="stAppViewContainer"][data-theme="dark"] {
+        --bg: #060b18;
     }
-    .badge-critical { background: #ff3366; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; }
-    .badge-high { background: #ff7722; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; }
-    .badge-medium { background: #ffd700; color: black; padding: 2px 10px; border-radius: 12px; font-size: 12px; }
-    .badge-low { background: #00ff88; color: black; padding: 2px 10px; border-radius: 12px; font-size: 12px; }
-    .badge-auto_fix { background: #00ff88; color: black; padding: 2px 8px; border-radius: 8px; font-size: 11px; }
-    .badge-approval_required { background: #ffd700; color: black; padding: 2px 8px; border-radius: 8px; font-size: 11px; }
-    .badge-suggest_only { background: #9b59b6; color: white; padding: 2px 8px; border-radius: 8px; font-size: 11px; }
-    .stTabs [data-baseweb="tab"] { background: var(--surface); color: var(--text); }
-    .stTabs [aria-selected="true"] { color: var(--accent) !important; border-bottom: 2px solid var(--accent) !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -71,7 +82,8 @@ st.markdown(
 def api_get(path: str) -> Optional[Any]:
     """Make a GET request to the API."""
     try:
-        r = httpx.get(f"{API_BASE}{path}", timeout=10)
+        base = _get_api_base()
+        r = _http_client.get(f"{base}{path}")
         r.raise_for_status()
         return r.json()
     except Exception as exc:
@@ -82,7 +94,8 @@ def api_get(path: str) -> Optional[Any]:
 def api_post(path: str, data: dict = None) -> Optional[Any]:
     """Make a POST request to the API."""
     try:
-        r = httpx.post(f"{API_BASE}{path}", json=data or {}, timeout=30)
+        base = _get_api_base()
+        r = _http_client.post(f"{base}{path}", json=data or {})
         r.raise_for_status()
         return r.json()
     except Exception as exc:
@@ -114,9 +127,20 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown("### Connection")
-    api_url = st.text_input("API URL", value=API_BASE)
-    if api_url != API_BASE:
-        os.environ["API_BASE_URL"] = api_url
+    api_url = st.text_input("API URL", value=_get_api_base(), key="sidebar_api_url")
+    if api_url:
+        st.session_state["api_base_url"] = api_url
+
+    # Warn if pointing at a K8s API server instead of the local FastAPI
+    _current = _get_api_base()
+    if any(k in _current for k in (".eks.amazonaws.com", ".azmk8s.io", "container.googleapis.com")):
+        st.error(
+            "⚠️ API URL points to a Kubernetes API server, not the SRE Operator API. "
+            "Change it to `http://localhost:8000` (or wherever the FastAPI server runs)."
+        )
+    if st.button("🔄 Reset to localhost:8000", key="reset_api_url"):
+        st.session_state["api_base_url"] = _DEFAULT_API_BASE
+        st.rerun()
 
     demo_mode = st.toggle("Demo Mode", value=True)
     auto_refresh = st.toggle("Auto-Refresh (30s)", value=False)
@@ -464,8 +488,8 @@ with tab4:
                     color="count", color_continuous_scale="reds",
                 )
                 fig.update_layout(
-                    plot_bgcolor="#0d1526", paper_bgcolor="#060b18",
-                    font_color="#e0e8ff", showlegend=False,
+                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    showlegend=False,
                 )
                 st.plotly_chart(fig, use_container_width=True)
         except Exception:
@@ -671,8 +695,8 @@ with tab7:
                     color="count", color_continuous_scale="blues",
                 )
                 fig.update_layout(
-                    plot_bgcolor="#0d1526", paper_bgcolor="#060b18",
-                    font_color="#e0e8ff", showlegend=False,
+                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    showlegend=False,
                 )
                 st.plotly_chart(fig, use_container_width=True)
             except Exception:

@@ -1,10 +1,10 @@
-"""Remediation outcome feedback tracker with extended analytics."""
+"""Remediation outcome feedback tracker with DB-backed structured feedback."""
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from knowledge.incident_store import IncidentStore
 
@@ -24,17 +24,14 @@ class FeedbackRecord:
 
 
 class FeedbackStore:
-    """Stores and retrieves operator feedback on remediation outcomes."""
+    """Stores and retrieves operator feedback on remediation outcomes.
+
+    All structured feedback is persisted to the `structured_feedback` table
+    in the database via IncidentStore. No data is lost on restart.
+    """
 
     def __init__(self, store: IncidentStore) -> None:
-        """Initialise with a shared IncidentStore.
-
-        Args:
-            store: The backing IncidentStore instance.
-        """
         self._store = store
-        # In-memory cache of structured feedback records (keyed by incident_id)
-        self._feedback_cache: Dict[str, FeedbackRecord] = {}
 
     def record_feedback(
         self,
@@ -43,7 +40,7 @@ class FeedbackStore:
         success: bool,
         feedback_notes: str = "",
     ) -> None:
-        """Record operator feedback for a remediation execution.
+        """Record basic operator feedback for a remediation execution.
 
         Args:
             incident_id: The incident ID.
@@ -57,11 +54,8 @@ class FeedbackStore:
             success=success,
             feedback_notes=feedback_notes,
         )
-        # Also update the incident's feedback_score in the store
         self._store.update_feedback(incident_id, success, feedback_notes)
-        logger.info(
-            "Feedback recorded: incident=%s success=%s", incident_id, success
-        )
+        logger.info("Feedback recorded: incident=%s success=%s", incident_id, success)
 
     def submit_feedback(
         self,
@@ -71,7 +65,7 @@ class FeedbackStore:
         operator_notes: str = "",
         better_remediation: Optional[str] = None,
     ) -> FeedbackRecord:
-        """Submit structured feedback on incident RCA and remediation quality.
+        """Submit structured feedback — persisted to the structured_feedback table.
 
         Args:
             incident_id: The incident UUID.
@@ -83,17 +77,16 @@ class FeedbackStore:
         Returns:
             The created FeedbackRecord.
         """
-        record = FeedbackRecord(
+        # Persist to structured_feedback table
+        self._store.save_structured_feedback(
             incident_id=incident_id,
             correct_root_cause=correct_root_cause,
             fix_worked=fix_worked,
             operator_notes=operator_notes,
             better_remediation=better_remediation,
-            feedback_at=datetime.utcnow().isoformat(),
         )
-        self._feedback_cache[incident_id] = record
 
-        # Persist success/failure into the incident store
+        # Also update the incident's feedback_score
         self._store.update_feedback(incident_id, fix_worked, operator_notes)
 
         # Also save as a remediation outcome for backward compatibility
@@ -104,6 +97,15 @@ class FeedbackStore:
             feedback_notes=operator_notes,
         )
 
+        record = FeedbackRecord(
+            incident_id=incident_id,
+            correct_root_cause=correct_root_cause,
+            fix_worked=fix_worked,
+            operator_notes=operator_notes,
+            better_remediation=better_remediation,
+            feedback_at=datetime.utcnow().isoformat(),
+        )
+
         logger.info(
             "Structured feedback submitted: incident=%s correct_rca=%s fix_worked=%s",
             incident_id, correct_root_cause, fix_worked,
@@ -111,7 +113,7 @@ class FeedbackStore:
         return record
 
     def get_feedback_for_incident(self, incident_id: str) -> Optional[FeedbackRecord]:
-        """Retrieve structured feedback for a specific incident.
+        """Retrieve structured feedback for a specific incident from the DB.
 
         Args:
             incident_id: The incident UUID.
@@ -119,7 +121,39 @@ class FeedbackStore:
         Returns:
             FeedbackRecord if available, else None.
         """
-        return self._feedback_cache.get(incident_id)
+        row = self._store.get_structured_feedback(incident_id)
+        if not row:
+            return None
+        return FeedbackRecord(
+            incident_id=row["incident_id"],
+            correct_root_cause=row["correct_root_cause"],
+            fix_worked=row["fix_worked"],
+            operator_notes=row.get("operator_notes", ""),
+            better_remediation=row.get("better_remediation"),
+            feedback_at=row.get("created_at", ""),
+        )
+
+    def list_feedback(self, limit: int = 100) -> List[FeedbackRecord]:
+        """List all structured feedback records from the DB.
+
+        Args:
+            limit: Maximum number of records.
+
+        Returns:
+            List of FeedbackRecord objects, most recent first.
+        """
+        rows = self._store.list_structured_feedback(limit=limit)
+        return [
+            FeedbackRecord(
+                incident_id=r["incident_id"],
+                correct_root_cause=r["correct_root_cause"],
+                fix_worked=r["fix_worked"],
+                operator_notes=r.get("operator_notes", ""),
+                better_remediation=r.get("better_remediation"),
+                feedback_at=r.get("created_at", ""),
+            )
+            for r in rows
+        ]
 
     def get_success_rate(self) -> Dict[str, Any]:
         """Compute overall remediation success rate from stored outcomes.
@@ -138,7 +172,10 @@ class FeedbackStore:
         }
 
     def get_accuracy_stats(self) -> Dict[str, Any]:
-        """Compute RCA accuracy and fix success statistics from feedback.
+        """Compute RCA accuracy and fix success statistics from the DB.
+
+        Uses the structured_feedback table for RCA accuracy (survives restarts),
+        and the incidents table feedback_score for fix success rate.
 
         Returns:
             Dict with: total_analyzed, correct_rca_pct, fix_success_pct, top_failure_types.
@@ -154,33 +191,24 @@ class FeedbackStore:
                 "top_failure_types": [],
             }
 
-        # Count resolved (positive feedback_score) vs failed
+        # Fix success rate from incidents table (feedback_score column)
         with_positive_feedback = sum(
-            1 for inc in incidents
-            if (inc.get("feedback_score") or 0.0) > 0
+            1 for inc in incidents if (inc.get("feedback_score") or 0.0) > 0
         )
         with_negative_feedback = sum(
-            1 for inc in incidents
-            if (inc.get("feedback_score") or 0.0) < 0
+            1 for inc in incidents if (inc.get("feedback_score") or 0.0) < 0
         )
         feedback_total = with_positive_feedback + with_negative_feedback
-
         fix_success_pct = (
             with_positive_feedback / feedback_total * 100
             if feedback_total > 0 else 0.0
         )
 
-        # Use structured feedback cache for RCA accuracy
-        correct_rca_count = sum(
-            1 for rec in self._feedback_cache.values()
-            if rec.correct_root_cause
-        )
-        cache_total = len(self._feedback_cache)
-        correct_rca_pct = (
-            correct_rca_count / cache_total * 100 if cache_total > 0 else 0.0
-        )
+        # RCA accuracy from structured_feedback table (persisted)
+        db_stats = self._store.get_feedback_accuracy_from_db()
+        correct_rca_pct = db_stats.get("correct_rca_pct", 0.0)
 
-        # Compute top failure types
+        # Top failure types
         type_counts: Dict[str, int] = {}
         for inc in incidents:
             inc_type = inc.get("type", "Unknown")

@@ -21,24 +21,55 @@ git clone https://github.com/anil-114912/ai-k8s-sre-operator
 cd ai-k8s-sre-operator
 pip install -r requirements.txt
 cp .env.example .env
+```
 
-# Terminal 1 — API
+### Running the API + Dashboard
+
+The system has two services that must run together:
+
+- **API server** (FastAPI) — the backend that runs detectors, AI analysis, stores incidents, handles feedback
+- **Dashboard** (Streamlit) — the frontend UI that calls the API for everything
+
+The dashboard does not work without the API. Start them in order:
+
+```bash
+# Terminal 1 — Start the API first
 make run-api
+# Wait until you see: Uvicorn running on http://0.0.0.0:8000
 
-# Terminal 2 — Dashboard
+# Terminal 2 — Then start the dashboard
 make run-ui
+# Opens at http://localhost:8501
+```
 
-# Terminal 3 — Simulate
+- API + Swagger docs: http://localhost:8000/docs
+- Dashboard: http://localhost:8501
+
+If you see `API error: Connection refused` in the dashboard, the API server is not running.
+
+### Simulate an incident
+
+```bash
+# Terminal 3 — requires API running
 make simulate
 ```
 
-API: http://localhost:8000/docs
-Dashboard: http://localhost:8501
+### Offline mode (no API server needed)
 
-Offline mode (no server needed):
+Runs the full pipeline locally — detection, correlation, AI analysis, remediation — without the API or dashboard:
 
 ```bash
 DEMO_MODE=1 python3 -m cli.main simulate --type crashloop --demo
+```
+
+### With AI (optional)
+
+The system works fully without any LLM API key (rule-based fallback). To enable AI-powered analysis:
+
+```bash
+# Edit .env and set ANTHROPIC_API_KEY or OPENAI_API_KEY
+# Then:
+DEMO_MODE=0 make run-api
 ```
 
 ---

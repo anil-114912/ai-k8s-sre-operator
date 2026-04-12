@@ -2,6 +2,21 @@
 
 Streamlit dashboard at http://localhost:8501 with 7 tabs.
 
+## Prerequisites
+
+The dashboard requires the API server running. Start them in order:
+
+```bash
+# Terminal 1 — API must be running first
+make run-api
+# Wait for: Uvicorn running on http://0.0.0.0:8000
+
+# Terminal 2 — Then start the dashboard
+make run-ui
+```
+
+If you see `API error: [Errno 61] Connection refused`, the API server is not running. Start it first.
+
 ## Start
 
 ```bash
@@ -9,8 +24,6 @@ make run-ui
 # or
 DEMO_MODE=1 API_BASE_URL=http://localhost:8000 streamlit run ui/streamlit_app.py
 ```
-
-Requires the API server running (`make run-api`).
 
 ## Tabs
 

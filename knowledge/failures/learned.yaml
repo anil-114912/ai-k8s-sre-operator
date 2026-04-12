@@ -1,4 +1,30 @@
-- id: learned-20260412034943-1
+- id: learned-20260412041726-1
+  title: 'Learned: Unknown in ns1/wl1'
+  scope: pod
+  symptoms:
+  - Application error in wl1
+  event_patterns: []
+  log_patterns:
+  - something unique 12345
+  metric_patterns: []
+  root_cause: 'Application error detected in ns1/wl1: something unique 12345'
+  remediation_steps:
+  - 'Check application logs: kubectl logs -n ns1 -l app=wl1'
+  - 'Describe pod: kubectl describe pod -n ns1 -l app=wl1'
+  - Review recent deployments for code changes that may have introduced the error
+  confidence_hints: []
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags:
+  - learned
+  - unknown
+  - ns1
+  learned_from_namespace: ns1
+  learned_from_workload: wl1
+  learned_at: '2026-04-12T04:17:26.160478+00:00'
+  feedback_count: 0
+  success_count: 0
+- id: learned-20260412042224-2
   title: 'Learned: CrashLoopBackOff in production/test-api'
   scope: pod
   symptoms:
@@ -22,6 +48,6 @@
   - production
   learned_from_namespace: production
   learned_from_workload: test-api
-  learned_at: '2026-04-12T03:49:43.497720+00:00'
-  feedback_count: 2
-  success_count: 2
+  learned_at: '2026-04-12T04:22:24.987052+00:00'
+  feedback_count: 5
+  success_count: 5

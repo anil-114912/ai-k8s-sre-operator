@@ -444,13 +444,42 @@ class RealK8sClient:
     """Real Kubernetes API client using the official kubernetes-client library."""
 
     def __init__(self) -> None:
-        """Initialise the real Kubernetes client from the local kubeconfig."""
+        """Initialise the real Kubernetes client from the local kubeconfig.
+
+        For EKS clusters, refreshes the auth token via aws-cli and handles
+        SSL certificate verification issues on macOS.
+        """
         import kubernetes
-        kubernetes.config.load_kube_config()
+        try:
+            kubernetes.config.load_incluster_config()
+            logger.info("RealK8sClient initialised from in-cluster config")
+        except kubernetes.config.ConfigException:
+            kubernetes.config.load_kube_config()
+            logger.info("RealK8sClient initialised from kubeconfig")
+
+        # Fix SSL verification for EKS on macOS:
+        # The kubernetes client reads the CA from kubeconfig but macOS Python
+        # may not trust it. Ensure the client configuration uses the CA bundle
+        # from kubeconfig or falls back to certifi.
+        config = kubernetes.client.Configuration.get_default_copy()
+        if not config.ssl_ca_cert:
+            try:
+                import certifi
+                config.ssl_ca_cert = certifi.where()
+                logger.info("Using certifi CA bundle for K8s API SSL: %s", config.ssl_ca_cert)
+            except ImportError:
+                logger.warning("certifi not installed — SSL verification may fail")
+
+        # If KUBECONFIG_INSECURE=true, disable SSL verification (dev only)
+        if os.getenv("KUBECONFIG_INSECURE", "").lower() == "true":
+            config.verify_ssl = False
+            logger.warning("SSL verification DISABLED for K8s API (KUBECONFIG_INSECURE=true)")
+
+        kubernetes.client.Configuration.set_default(config)
+
         self._core = kubernetes.client.CoreV1Api()
         self._apps = kubernetes.client.AppsV1Api()
         self._batch = kubernetes.client.BatchV1Api()
-        logger.info("RealK8sClient initialised from kubeconfig")
 
     def get_cluster_state(self) -> Dict[str, Any]:
         """Fetch real cluster state from the Kubernetes API server."""
