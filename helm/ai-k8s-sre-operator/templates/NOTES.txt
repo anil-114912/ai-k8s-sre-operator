@@ -1,0 +1,64 @@
+AI K8s SRE Operator has been deployed to namespace {{ .Release.Namespace }}.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STORAGE CLASS REQUIREMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{- if .Values.persistence.enabled }}
+{{- if .Values.persistence.storageClass }}
+  StorageClass: {{ .Values.persistence.storageClass }}
+{{- else }}
+  StorageClass: (cluster default)
+
+  WARNING: persistence.storageClass is not set. The operator PVC will use
+  your cluster's default StorageClass. If no default StorageClass exists,
+  the PVC will remain Pending and the operator will not start.
+
+  Check your cluster's default StorageClass:
+    kubectl get storageclass
+
+  If there is no default, either:
+    a) Set persistence.storageClass in your values file:
+         helm upgrade {{ .Release.Name }} ... --set persistence.storageClass=<your-class>
+
+    b) Mark an existing StorageClass as default:
+         kubectl patch storageclass <name> -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+
+  Common StorageClass names by platform:
+    EKS  : gp2 (legacy) or gp3 (EBS CSI)
+    AKS  : default (Azure Disk) or azurefile
+    GKE  : standard or standard-rwo (Persistent Disk CSI)
+    Kind : standard (local-path-provisioner)
+    Minikube: standard (hostpath)
+{{- end }}
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CLOUD PROVIDER DETECTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{- if .Values.cluster.provider }}
+  Provider set explicitly: {{ .Values.cluster.provider }}
+{{- else }}
+  Provider: auto-detect (will inspect node labels at startup)
+
+  To set explicitly (enables cloud-specific KB patterns immediately):
+    helm upgrade {{ .Release.Name }} ... --set cluster.provider=<aws|azure|gcp|generic>
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ACCESS THE API
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Port-forward to access the API locally:
+    kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "ai-k8s-sre-operator.fullname" . }} 8000:{{ .Values.service.port }}
+
+  Then open:
+    http://localhost:8000/docs   (Swagger UI)
+    http://localhost:8000/health (Health check)
+
+  Or port-forward the Streamlit UI:
+    kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "ai-k8s-sre-operator.fullname" . }}-ui 8501:{{ .Values.ui.port }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VERIFY DEPLOYMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=api --tail=50

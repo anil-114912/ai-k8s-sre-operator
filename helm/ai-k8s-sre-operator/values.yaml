@@ -20,6 +20,15 @@ llm:
   existingSecret: ""        # name of existing secret with LLM_API_KEY
   apiKey: ""               # (prefer existingSecret in production)
 
+## Cluster / cloud provider context
+## Set to one of: aws | azure | gcp | generic
+## Leave empty (or "auto") to let the operator detect the provider at startup
+## by inspecting node labels and spec.providerID.
+## When set, the matching cloud-specific KB patterns are boosted automatically —
+## no need to pass ?provider=... on every API call.
+cluster:
+  provider: ""  # auto-detect
+
 ## Operator behaviour
 operator:
   dryRun: true              # never auto-execute in prod without explicit opt-in

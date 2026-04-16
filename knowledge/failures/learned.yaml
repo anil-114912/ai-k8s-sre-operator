@@ -1,4 +1,4 @@
-- id: learned-20260412041726-1
+- id: learned-20260412052506-1
   title: 'Learned: Unknown in ns1/wl1'
   scope: pod
   symptoms:
@@ -21,10 +21,10 @@
   - ns1
   learned_from_namespace: ns1
   learned_from_workload: wl1
-  learned_at: '2026-04-12T04:17:26.160478+00:00'
+  learned_at: '2026-04-12T05:25:06.603516+00:00'
   feedback_count: 0
   success_count: 0
-- id: learned-20260412042224-2
+- id: learned-20260412053010-2
   title: 'Learned: CrashLoopBackOff in production/test-api'
   scope: pod
   symptoms:
@@ -48,6 +48,6 @@
   - production
   learned_from_namespace: production
   learned_from_workload: test-api
-  learned_at: '2026-04-12T04:22:24.987052+00:00'
-  feedback_count: 5
-  success_count: 5
+  learned_at: '2026-04-12T05:30:10.314807+00:00'
+  feedback_count: 1
+  success_count: 1

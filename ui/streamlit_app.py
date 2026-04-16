@@ -4,7 +4,15 @@ from __future__ import annotations
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Load .env from project root so DEMO_MODE, KUBECONFIG, etc. are available
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
+except ImportError:
+    pass
 
 import httpx
 import streamlit as st
@@ -142,22 +150,18 @@ with st.sidebar:
         st.session_state["api_base_url"] = _DEFAULT_API_BASE
         st.rerun()
 
-    demo_mode = st.toggle("Demo Mode", value=True)
-    auto_refresh = st.toggle("Auto-Refresh (30s)", value=False)
-
-    st.markdown("### Provider")
-    provider = st.selectbox("LLM Provider", ["anthropic", "openai", "rule-based"])
-
     st.markdown("---")
     health = api_get("/health")
     if health:
-        st.success(f"✅ API Online — v{health.get('version', '?')}")
+        is_demo = health.get("demo_mode", True)
+        cluster_mode = health.get("cluster", "simulated")
+        if is_demo:
+            st.warning(f"🎮 Demo Mode — simulated cluster")
+        else:
+            st.success(f"✅ Live Cluster — {cluster_mode}")
+        st.caption(f"API v{health.get('version', '?')}")
     else:
-        st.error("❌ API Offline")
-
-    if auto_refresh:
-        time.sleep(30)
-        st.rerun()
+        st.error("❌ API Offline — run `make run-api` first")
 
 # ---------------------------------------------------------------------------
 # Header

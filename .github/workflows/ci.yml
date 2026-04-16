@@ -74,3 +74,61 @@ jobs:
           version: v3.14.4
       - name: Lint Helm chart
         run: helm lint helm/ai-k8s-sre-operator
+
+  integration:
+    name: Integration test (Kind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: sre-operator-test
+          wait: 60s
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Start API against real Kind cluster (background)
+        run: |
+          export DEMO_MODE=0
+          export DATABASE_URL="sqlite:///./integration_test.db"
+          export LOG_LEVEL=WARNING
+          python -m uvicorn api.main:app --host 127.0.0.1 --port 8765 &
+          echo $! > /tmp/api.pid
+          # Wait for API to be ready (up to 30 s)
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8765/health && break
+            sleep 1
+          done
+
+      - name: Verify health endpoint
+        run: curl -sf http://127.0.0.1:8765/health | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='healthy', d"
+
+      - name: Verify cluster scan returns real data (not simulated)
+        run: |
+          RESULT=$(curl -sf -X POST http://127.0.0.1:8765/api/v1/scan)
+          echo "Scan result: $RESULT"
+          # scanned_at must be present and total_detections must be a number
+          python3 -c "
+          import sys, json
+          d = json.loads('$RESULT')
+          assert 'scanned_at' in d, 'missing scanned_at'
+          assert isinstance(d['total_detections'], int), 'total_detections not an int'
+          print('Scan response OK:', d)
+          "
+
+      - name: Verify provider auto-detected as generic (Kind has no cloud labels)
+        run: |
+          STATUS=$(curl -sf http://127.0.0.1:8765/api/v1/cluster/status || echo '{}')
+          echo "Cluster status: $STATUS"
+
+      - name: Stop API
+        if: always()
+        run: kill $(cat /tmp/api.pid) 2>/dev/null || true

@@ -71,6 +71,92 @@
   tags: [gke, gcp, autopilot, quota, resources, scheduling]
   provider: gcp
 
+- id: gke-004
+  title: "GKE Node Auto-Provisioning (NAP) fails to create new node pool"
+  scope: cluster
+  symptoms:
+    - "Cluster Autoscaler cannot provision nodes via NAP"
+    - "NAP node pool stuck in provisioning"
+    - "Pods Pending despite NAP being enabled"
+    - "Failed to create node pool via auto-provisioning"
+  event_patterns:
+    - "node auto-provisioning"
+    - "NAP"
+    - "cluster-autoscaler"
+    - "failed to provision"
+    - "node pool"
+  log_patterns:
+    - "node auto-provisioning"
+    - "nap"
+    - "failed to create node pool"
+    - "auto-provisioning"
+    - "resource limit"
+    - "cluster autoscaler"
+  metric_patterns:
+    - "cluster_autoscaler_unschedulable_pods_count > 0"
+  root_cause: "GKE Node Auto-Provisioning (NAP) cannot create a new node pool — common causes include NAP resource limits (max CPU/memory per cluster), missing GPU quota, no valid machine type matching pod requests, or a GCP resource quota being exhausted"
+  remediation_steps:
+    - "Check cluster-autoscaler logs: kubectl logs -n kube-system -l k8s-app=cluster-autoscaler"
+    - "View NAP resource limits: gcloud container clusters describe <cluster> --zone <zone> | grep autoprovisioning"
+    - "Increase NAP resource limits: gcloud container clusters update <cluster> --enable-autoprovisioning --max-cpu <n> --max-memory <gb>"
+    - "Check GCP project quotas: gcloud compute regions describe <region> | grep -A2 quota"
+    - "Request quota increase via GCP Console: IAM & Admin > Quotas"
+    - "If GPU is needed: request GPU quota in the target region"
+    - "As fallback: manually create a node pool with the required machine type"
+  confidence_hints:
+    - pattern: "node auto-provisioning"
+      boost: 0.5
+    - pattern: "nap"
+      boost: 0.4
+    - pattern: "failed to create node pool"
+      boost: 0.35
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [gke, gcp, nap, autoprovisioning, autoscaler, quota, node-pool]
+  provider: gcp
+
+- id: gke-005
+  title: "GKE Binary Authorization policy blocking pod admission"
+  scope: pod
+  symptoms:
+    - "Pod admission denied by Binary Authorization"
+    - "Image not attested or policy not satisfied"
+    - "DENIED_BY_BREAKGLASS_ATTESTOR or no attestation found"
+  event_patterns:
+    - "BinaryAuthorization"
+    - "attestation"
+    - "admission denied"
+    - "policy violation"
+    - "image not allowed"
+  log_patterns:
+    - "binary authorization"
+    - "attestation"
+    - "admission denied"
+    - "policy violation"
+    - "image not allowed"
+    - "binauthz"
+    - "attestor"
+  metric_patterns: []
+  root_cause: "GKE Binary Authorization is enforcing an admission policy that requires container images to have valid attestations (signed by a trusted attestor) before they can run — the image being deployed lacks the required attestation or the policy is in enforcing mode"
+  remediation_steps:
+    - "Check the Binary Authorization denial reason in pod events: kubectl describe pod <name> -n <namespace>"
+    - "View current policy: gcloud container binauthz policy export"
+    - "Check image attestations: gcloud container binauthz attestations list --attestor=<name> --attestor-project=<project>"
+    - "To unblock quickly: switch policy to DRY_RUN mode while investigating: gcloud container binauthz policy import <policy.yaml>"
+    - "Create an attestation for the image: gcloud container binauthz attestations sign-and-create --artifact-url=<image-digest> --attestor=<name> --attestor-project=<project> --keyversion=<kms-keyversion>"
+    - "Long term: integrate attestation signing into your CI/CD pipeline"
+  confidence_hints:
+    - pattern: "binary authorization"
+      boost: 0.5
+    - pattern: "attestation"
+      boost: 0.4
+    - pattern: "admission denied"
+      boost: 0.25
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [gke, gcp, binary-authorization, binauthz, admission, security, attestation]
+  provider: gcp
+
 - id: gke-003
   title: "GKE Filestore (NFS) mount failure"
   scope: pod

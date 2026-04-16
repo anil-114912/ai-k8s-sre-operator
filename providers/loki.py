@@ -10,7 +10,10 @@ import requests
 logger = logging.getLogger(__name__)
 
 LOKI_URL = os.getenv("LOKI_URL", "")
-DEMO_MODE = os.getenv("DEMO_MODE", "1") == "1"
+
+
+def _is_demo_mode() -> bool:
+    return os.getenv("DEMO_MODE", "0").lower() in {"1", "true", "yes"}
 
 
 class LokiClient:
@@ -23,7 +26,7 @@ class LokiClient:
             base_url: Loki base URL. Defaults to LOKI_URL env var.
         """
         self.base_url = (base_url or LOKI_URL or "http://loki.monitoring.svc:3100").rstrip("/")
-        self.available = bool(LOKI_URL) and not DEMO_MODE
+        self.available = bool(LOKI_URL) and not _is_demo_mode()
         logger.info("LokiClient: base_url=%s available=%s", self.base_url, self.available)
 
     def query_logs(

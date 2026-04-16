@@ -117,6 +117,8 @@ class CrashLoopDetector(BaseDetector):
                             "restart_count": restart_count,
                             "phase": pod.get("phase", "Running"),
                             "container_state": state,
+                            "last_state": last_state,
+                            "exit_code": terminated.get("exitCode") if terminated else None,
                         },
                     )
                 )

@@ -113,6 +113,85 @@
   tags: [eks, aws, eni, vpc-cni, ip-exhaustion, networking]
   provider: aws
 
+- id: eks-005
+  title: "EKS Fargate pod unschedulable — no matching Fargate profile"
+  scope: pod
+  symptoms:
+    - "Pod stuck Pending on Fargate cluster"
+    - "No Fargate profile matches pod namespace or labels"
+    - "FailedScheduling: no nodes available for Fargate"
+  event_patterns:
+    - "FailedScheduling"
+    - "fargate"
+    - "no nodes available"
+    - "fargate profile"
+  log_patterns:
+    - "fargate profile"
+    - "no matching fargate profile"
+    - "fargate node"
+    - "0/0 nodes are available"
+  metric_patterns: []
+  root_cause: "The pod cannot be scheduled on EKS Fargate because no Fargate profile exists that matches the pod's namespace and/or label selectors — Fargate only runs pods explicitly covered by a profile"
+  remediation_steps:
+    - "List existing Fargate profiles: aws eks list-fargate-profiles --cluster-name <cluster>"
+    - "Check profile selectors: aws eks describe-fargate-profile --cluster-name <cluster> --fargate-profile-name <name>"
+    - "Create a Fargate profile covering the namespace: aws eks create-fargate-profile --cluster-name <cluster> --fargate-profile-name <name> --pod-execution-role-arn <arn> --selectors namespace=<ns>"
+    - "Verify pod labels match the Fargate profile selectors"
+    - "Note: kube-system pods require an explicit Fargate profile if running fully serverless"
+  confidence_hints:
+    - pattern: "fargate profile"
+      boost: 0.5
+    - pattern: "0/0 nodes are available"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [eks, aws, fargate, scheduling, serverless, profile]
+  provider: aws
+
+- id: eks-006
+  title: "EKS API server throttling — too many requests from workloads"
+  scope: cluster
+  symptoms:
+    - "kubectl commands intermittently fail with 429 or Throttling"
+    - "client-side rate limit exceeded in pod logs"
+    - "API server request timeout"
+    - "slow cluster operations"
+  event_patterns:
+    - "Throttling"
+    - "rate limit"
+    - "too many requests"
+    - "apiserver"
+  log_patterns:
+    - "Throttling"
+    - "rate limit exceeded"
+    - "429"
+    - "client-side throttling"
+    - "request timeout"
+    - "apiserver throttling"
+    - "etcd"
+  metric_patterns:
+    - "apiserver_request_total{code='429'} > 0"
+    - "apiserver_current_inflight_requests > 200"
+  root_cause: "The EKS API server is being overwhelmed by excessive LIST/WATCH calls from controllers, operators, or poorly configured client workloads — EKS imposes per-cluster API server request rate limits"
+  remediation_steps:
+    - "Check API server metrics: kubectl get --raw /metrics | grep apiserver_request_total"
+    - "Identify noisy clients: kubectl logs -n kube-system -l component=kube-apiserver | grep 'rejected'"
+    - "Reduce LIST/WATCH frequency in custom controllers (use informers with resync periods >= 10m)"
+    - "Enable client-side rate limiting: set --kube-api-qps and --kube-api-burst in controller flags"
+    - "Review and remove unnecessary CRD watch loops"
+    - "Contact AWS Support to review API server limits for large clusters"
+  confidence_hints:
+    - pattern: "Throttling"
+      boost: 0.4
+    - pattern: "rate limit exceeded"
+      boost: 0.35
+    - pattern: "429"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [eks, aws, apiserver, throttling, rate-limit, performance]
+  provider: aws
+
 - id: eks-004
   title: "EKS add-on version incompatible"
   scope: cluster

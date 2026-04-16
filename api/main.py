@@ -4,7 +4,17 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Load .env file BEFORE any other imports read os.getenv
+try:
+    from dotenv import load_dotenv
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+    if _env_path.is_file():
+        load_dotenv(_env_path, override=True)
+except ImportError:
+    pass
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -130,9 +140,121 @@ class ScanResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
-async def health() -> Dict[str, str]:
-    """Health check endpoint."""
-    return {"status": "ok", "service": "ai-k8s-sre-operator", "version": "0.1.0"}
+async def health() -> Dict[str, Any]:
+    """Health check endpoint — includes current operating mode."""
+    from providers.kubernetes import _is_demo_mode
+    return {
+        "status": "ok",
+        "service": "ai-k8s-sre-operator",
+        "version": "0.1.0",
+        "demo_mode": _is_demo_mode(),
+        "cluster": "simulated" if _is_demo_mode() else "live",
+    }
+
+
+@app.get("/api/v1/debug/provider")
+async def debug_provider() -> Dict[str, Any]:
+    """Diagnose which K8s provider is active and why.
+
+    Returns detailed info about env vars, client type, and any
+    initialisation errors so connectivity issues can be debugged.
+    """
+    import traceback as tb
+    from providers.kubernetes import _is_demo_mode, RealK8sClient
+
+    demo = _is_demo_mode()
+    env_demo = os.getenv("DEMO_MODE", "<not set>")
+    env_kubeconfig = os.getenv("KUBECONFIG", "<not set>")
+
+    result: Dict[str, Any] = {
+        "DEMO_MODE_env": env_demo,
+        "KUBECONFIG_env": env_kubeconfig,
+        "is_demo_mode": demo,
+        "client_type": None,
+        "real_client_error": None,
+        "namespaces": None,
+        "pod_count": None,
+    }
+
+    if demo:
+        result["client_type"] = "_SimulatedK8s"
+        return result
+
+    # Try to instantiate real client and probe it
+    try:
+        client = RealK8sClient()
+        result["client_type"] = "RealK8sClient"
+        try:
+            state = client.get_cluster_state()
+            pods = state.get("pods", [])
+            result["pod_count"] = len(pods)
+            result["namespaces"] = sorted({p.get("namespace", "?") for p in pods})
+        except Exception as probe_exc:
+            result["real_client_error"] = f"get_cluster_state failed: {type(probe_exc).__name__}: {probe_exc}"
+            result["traceback"] = tb.format_exc()
+    except Exception as init_exc:
+        result["client_type"] = "_SimulatedK8s (fallback)"
+        result["real_client_error"] = f"RealK8sClient() init failed: {type(init_exc).__name__}: {init_exc}"
+        result["traceback"] = tb.format_exc()
+
+    return result
+
+
+@app.get("/api/v1/debug/llm")
+async def debug_llm() -> Dict[str, Any]:
+    """Show which LLM provider is active and whether an API key is configured."""
+    from ai.llm import get_llm_client, reset_llm_client
+    client = get_llm_client()
+    return {
+        "provider": client.provider,
+        "demo_mode_fallback": client.demo_mode,
+        "anthropic_active": client._anthropic_client is not None,
+        "openai_active": client._openai_client is not None,
+        "ANTHROPIC_API_KEY_set": bool(os.getenv("ANTHROPIC_API_KEY", "")),
+        "OPENAI_API_KEY_set": bool(os.getenv("OPENAI_API_KEY", "")),
+    }
+
+
+@app.post("/api/v1/debug/llm/reload")
+async def reload_llm() -> Dict[str, Any]:
+    """Reload the LLM client — picks up a newly added API key without restarting the server."""
+    from ai.llm import reset_llm_client
+    client = reset_llm_client()
+    return {
+        "reloaded": True,
+        "provider": client.provider,
+        "demo_mode_fallback": client.demo_mode,
+        "anthropic_active": client._anthropic_client is not None,
+    }
+
+
+@app.get("/api/v1/debug/pods")
+async def debug_pods(ns: Optional[str] = Query(None)) -> Dict[str, Any]:
+    """Dump raw parsed pod dicts from the real cluster state — for debugging detector input."""
+    client = get_k8s_client()
+    state = client.get_cluster_state()
+    pods = state.get("pods", [])
+    if ns:
+        pods = [p for p in pods if p.get("namespace") == ns]
+    # Summarise each pod for readability
+    summary = []
+    for p in pods:
+        cs_summary = [
+            {
+                "name": cs.get("name"),
+                "restartCount": cs.get("restartCount"),
+                "state": cs.get("state"),
+                "lastState": cs.get("lastState"),
+            }
+            for cs in p.get("container_statuses", [])
+        ]
+        summary.append({
+            "name": p.get("name"),
+            "namespace": p.get("namespace"),
+            "phase": p.get("phase"),
+            "container_statuses": cs_summary,
+        })
+    return {"pod_count": len(summary), "pods": summary}
 
 
 @app.post("/api/v1/incidents", response_model=Incident)
@@ -622,9 +744,23 @@ async def get_cluster_patterns(
     return _store.get_cluster_patterns(cluster_name, limit=limit)
 
 
+@app.delete("/api/v1/incidents", response_model=None, status_code=204)
+async def clear_incidents() -> None:
+    """Clear all in-memory incidents (useful after switching from demo → live mode)."""
+    _incidents.clear()
+
+
 @app.post("/api/v1/scan", response_model=ScanResponse)
-async def scan_cluster(namespace: Optional[str] = Query(None)) -> ScanResponse:
+async def scan_cluster(
+    namespace: Optional[str] = Query(None),
+    clear_existing: bool = Query(False, alias="clear"),
+) -> ScanResponse:
     """Trigger a full cluster scan running all detectors.
+
+    Args:
+        namespace: Optional namespace filter.
+        clear: If true, clears all existing in-memory incidents before scanning
+               (use this after switching from demo to live mode).
 
     Args:
         namespace: Optional namespace filter.
@@ -632,6 +768,11 @@ async def scan_cluster(namespace: Optional[str] = Query(None)) -> ScanResponse:
     Returns:
         ScanResponse with detection counts and created incident IDs.
     """
+    if clear_existing:
+        _incidents.clear()
+        _plans.clear()
+        logger.info("Cleared existing incidents and plans before scan")
+
     client = get_k8s_client()
     cluster_state = client.get_cluster_state()
 
@@ -644,6 +785,19 @@ async def scan_cluster(namespace: Optional[str] = Query(None)) -> ScanResponse:
             all_detections.extend(results)
         except Exception as exc:
             logger.error("Detector %s failed: %s", detector.name, exc)
+
+    # Deduplicate: keep only the newest detection per (namespace, workload, type)
+    seen: Dict[str, Any] = {}
+    deduped = []
+    for det in all_detections:
+        key = f"{det.namespace}/{det.workload}/{det.incident_type}"
+        if key not in seen:
+            seen[key] = True
+            deduped.append(det)
+    all_detections = deduped
+
+    from collectors.logs_collector import LogsCollector
+    _logs_collector = LogsCollector()
 
     created_ids = []
     for det in all_detections:
@@ -669,6 +823,45 @@ async def scan_cluster(namespace: Optional[str] = Query(None)) -> ScanResponse:
             raw_signals=det.raw_signals,
             provider_used="kubernetes",
         )
+
+        # Enrich incident with actual pod logs and log analysis
+        if incident.pod_name:
+            container_name = incident.raw_signals.get("container_name", "") if incident.raw_signals else ""
+            log_lines = cluster_state.get("recent_logs", {}).get(
+                f"{incident.namespace}/{incident.pod_name}/{container_name}", []
+            )
+            if not log_lines:
+                log_lines = _logs_collector.get_pod_logs(
+                    incident.namespace, incident.pod_name, container_name,
+                    tail_lines=80, previous=True,
+                )
+            if log_lines:
+                analysis = _logs_collector.analyze_logs(log_lines)
+                if incident.raw_signals is None:
+                    incident.raw_signals = {}
+                incident.raw_signals["log_analysis"] = analysis
+                incident.raw_signals["recent_logs"] = log_lines[:50]
+                # Add key log lines as evidence
+                if analysis.get("key_lines"):
+                    from models.incident import Evidence
+                    incident.evidence = incident.evidence or []
+                    incident.evidence.append(Evidence(
+                        source="pod_logs",
+                        content="Key log lines:\n" + "\n".join(analysis["key_lines"][:10]),
+                        relevance=0.95,
+                    ))
+                if analysis.get("suggested_cause") and analysis.get("error_category") != "unknown":
+                    from models.incident import Evidence
+                    incident.evidence = incident.evidence or []
+                    incident.evidence.append(Evidence(
+                        source="log_analysis",
+                        content=f"Log analysis: {analysis['suggested_cause']} (category={analysis['error_category']})",
+                        relevance=0.9,
+                    ))
+                # Boost confidence based on log clarity
+                if analysis.get("confidence_boost", 0) > 0:
+                    incident.confidence = min(1.0, (incident.confidence or 0.5) + analysis["confidence_boost"])
+
         _incidents[incident.id] = incident
         _store.save_incident(incident)
         created_ids.append(incident.id)

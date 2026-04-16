@@ -10,7 +10,10 @@ import requests
 logger = logging.getLogger(__name__)
 
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
-DEMO_MODE = os.getenv("DEMO_MODE", "1") == "1"
+
+
+def _is_demo_mode() -> bool:
+    return os.getenv("DEMO_MODE", "0").lower() in {"1", "true", "yes"}
 
 
 class PrometheusClient:
@@ -34,7 +37,7 @@ class PrometheusClient:
         Returns:
             Prometheus API response dict.
         """
-        if DEMO_MODE:
+        if _is_demo_mode():
             return self._simulated_query(promql)
 
         try:
@@ -67,7 +70,7 @@ class PrometheusClient:
         Returns:
             Prometheus range query response dict.
         """
-        if DEMO_MODE:
+        if _is_demo_mode():
             return {"status": "success", "data": {"resultType": "matrix", "result": []}}
 
         try:

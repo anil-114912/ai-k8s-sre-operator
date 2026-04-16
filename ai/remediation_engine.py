@@ -12,28 +12,161 @@ from models.remediation import RemediationPlan, RemediationStep, SafetyLevel
 
 logger = logging.getLogger(__name__)
 
-# Incident type → default remediation strategy
-DEFAULT_REMEDIATIONS: Dict[str, List[Dict[str, Any]]] = {
-    "CrashLoopBackOff": [
+# CrashLoopBackOff sub-strategies keyed by root cause signal
+# Selected at runtime by _select_crashloop_strategy()
+_CRASHLOOP_STRATEGIES: Dict[str, List[Dict[str, Any]]] = {
+    # Exit code 137 = OOMKill inside a crash loop (container killed by kernel)
+    "oom": [
         {
             "order": 1,
             "action": "collect_diagnostics",
-            "command": "kubectl describe pod {pod} -n {ns} && kubectl logs {pod} -n {ns} --previous",
-            "description": "Collect pod description and previous container logs for diagnostics",
+            "command": "kubectl describe pod {pod} -n {ns}",
+            "description": "Inspect pod events and resource usage to confirm OOMKill pattern",
             "safety_level": "auto_fix",
             "reversible": True,
             "estimated_duration_secs": 10,
         },
         {
             "order": 2,
-            "action": "rollout_restart",
-            "command": "kubectl rollout restart deployment/{workload} -n {ns}",
-            "description": "Rolling restart the deployment to clear the failed state",
+            "action": "patch_memory_limit",
+            "command": "kubectl set resources deployment/{workload} -n {ns} --limits=memory=512Mi --requests=memory=256Mi",
+            "description": "Increase memory limit — container is being killed by the OOM killer before it can start cleanly",
+            "safety_level": "approval_required",
+            "reversible": True,
+            "estimated_duration_secs": 60,
+        },
+        {
+            "order": 3,
+            "action": "verify_recovery",
+            "command": "kubectl rollout status deployment/{workload} -n {ns} --timeout=120s",
+            "description": "Confirm pods come up healthy after the memory limit change",
             "safety_level": "auto_fix",
             "reversible": True,
             "estimated_duration_secs": 120,
         },
     ],
+    # Exit code 1 with config/secret keywords in logs → missing env var or secret
+    "missing_config": [
+        {
+            "order": 1,
+            "action": "collect_logs",
+            "command": "kubectl logs {pod} -n {ns} --previous --tail=50",
+            "description": "Read the last 50 lines of the crashed container to confirm the missing config error",
+            "safety_level": "auto_fix",
+            "reversible": True,
+            "estimated_duration_secs": 10,
+        },
+        {
+            "order": 2,
+            "action": "inspect_secrets_and_configmaps",
+            "command": "kubectl get secret,configmap -n {ns} && kubectl describe pod {pod} -n {ns} | grep -A5 'Environment\\|Mounts'",
+            "description": "List all secrets and configmaps in the namespace and compare against what the pod expects",
+            "safety_level": "auto_fix",
+            "reversible": True,
+            "estimated_duration_secs": 15,
+        },
+        {
+            "order": 3,
+            "action": "create_missing_secret",
+            "command": "kubectl create secret generic <secret-name> -n {ns} --from-literal=<KEY>=<VALUE>",
+            "description": "Create the missing secret or configmap identified in step 2 — fill in the actual key/value from your app config",
+            "safety_level": "suggest_only",
+            "reversible": True,
+            "estimated_duration_secs": 30,
+        },
+        {
+            "order": 4,
+            "action": "rollout_restart",
+            "command": "kubectl rollout restart deployment/{workload} -n {ns}",
+            "description": "Restart the deployment after the missing secret/config is in place — only run this after step 3 is complete",
+            "safety_level": "approval_required",
+            "reversible": True,
+            "estimated_duration_secs": 120,
+        },
+    ],
+    # Exit code 139 = segfault, or image-related crash → bad image, rollback
+    "bad_image": [
+        {
+            "order": 1,
+            "action": "collect_logs",
+            "command": "kubectl logs {pod} -n {ns} --previous --tail=50",
+            "description": "Capture crash output from the previous container run to confirm image-level failure",
+            "safety_level": "auto_fix",
+            "reversible": True,
+            "estimated_duration_secs": 10,
+        },
+        {
+            "order": 2,
+            "action": "check_image",
+            "command": "kubectl get deployment {workload} -n {ns} -o jsonpath='{{.spec.template.spec.containers[*].image}}'",
+            "description": "Confirm the currently deployed image tag — determine if this is a new broken release",
+            "safety_level": "auto_fix",
+            "reversible": True,
+            "estimated_duration_secs": 5,
+        },
+        {
+            "order": 3,
+            "action": "rollback_deployment",
+            "command": "kubectl rollout undo deployment/{workload} -n {ns}",
+            "description": "Roll back to the previous known-good image version",
+            "safety_level": "approval_required",
+            "reversible": True,
+            "estimated_duration_secs": 90,
+        },
+        {
+            "order": 4,
+            "action": "verify_recovery",
+            "command": "kubectl rollout status deployment/{workload} -n {ns} --timeout=120s",
+            "description": "Confirm rollback succeeded and pods are running without crashes",
+            "safety_level": "auto_fix",
+            "reversible": True,
+            "estimated_duration_secs": 120,
+        },
+    ],
+    # Generic CrashLoop with no clear signal — diagnose first, never blind-restart
+    "unknown": [
+        {
+            "order": 1,
+            "action": "collect_logs",
+            "command": "kubectl logs {pod} -n {ns} --previous --tail=100",
+            "description": "Read previous container logs — this is the primary diagnostic for understanding why the app is crashing",
+            "safety_level": "auto_fix",
+            "reversible": True,
+            "estimated_duration_secs": 10,
+        },
+        {
+            "order": 2,
+            "action": "describe_pod",
+            "command": "kubectl describe pod {pod} -n {ns}",
+            "description": "Check pod events, exit codes, and resource pressure signals",
+            "safety_level": "auto_fix",
+            "reversible": True,
+            "estimated_duration_secs": 10,
+        },
+        {
+            "order": 3,
+            "action": "check_recent_changes",
+            "command": "kubectl rollout history deployment/{workload} -n {ns}",
+            "description": "Review deployment rollout history — if a recent change caused this, rollback is the fastest fix",
+            "safety_level": "auto_fix",
+            "reversible": True,
+            "estimated_duration_secs": 10,
+        },
+        {
+            "order": 4,
+            "action": "rollback_or_fix",
+            "command": "kubectl rollout undo deployment/{workload} -n {ns}",
+            "description": "Roll back to last known-good revision if a recent deploy caused the crash — skip if the crash is pre-existing",
+            "safety_level": "suggest_only",
+            "reversible": True,
+            "estimated_duration_secs": 90,
+        },
+    ],
+}
+
+# Incident type → default remediation strategy
+DEFAULT_REMEDIATIONS: Dict[str, List[Dict[str, Any]]] = {
+    "CrashLoopBackOff": _CRASHLOOP_STRATEGIES["unknown"],  # overridden at runtime
     "OOMKilled": [
         {
             "order": 1,
@@ -229,6 +362,61 @@ class RemediationEngine:
             logger.error("LLM remediation generation failed: %s", exc)
             return None
 
+    def _select_crashloop_strategy(self, incident: Incident) -> str:
+        """Pick the right CrashLoop sub-strategy from exit code and root cause signals.
+
+        Args:
+            incident: Incident with raw_signals and optional root_cause.
+
+        Returns:
+            Strategy key: 'oom', 'missing_config', 'bad_image', or 'unknown'.
+        """
+        raw = incident.raw_signals or {}
+
+        # Top-level exit_code stored directly by detector (most reliable)
+        exit_code = raw.get("exit_code")
+
+        # Fallback: dig into last_state / container_state dicts
+        if exit_code is None:
+            for state_dict in (raw.get("last_state", {}), raw.get("container_state", {})):
+                terminated = state_dict.get("terminated", {}) if isinstance(state_dict, dict) else {}
+                if terminated.get("exitCode") is not None:
+                    exit_code = terminated["exitCode"]
+                    break
+
+        root_cause = (incident.root_cause or "").lower()
+        explanation = (incident.ai_explanation or "").lower()
+        combined_text = root_cause + " " + explanation
+
+        # Check log analysis category first — most reliable direct signal from logs
+        log_analysis = raw.get("log_analysis", {})
+        log_category = log_analysis.get("error_category", "unknown") if isinstance(log_analysis, dict) else "unknown"
+
+        # OOMKill signals: log category, exit code 137, or OOM keywords
+        if log_category == "oom" or exit_code == 137 or any(kw in combined_text for kw in ("oom", "out of memory", "memory limit", "killed")):
+            return "oom"
+
+        # Missing config: log category or config keywords
+        if log_category == "missing_config" or any(kw in combined_text for kw in (
+            "secret", "configmap", "env", "environment variable", "configuration",
+            "missing", "not found", "no such", "credentials", "token", "password",
+            "connection refused", "database", "cannot connect",
+        )):
+            return "missing_config"
+
+        # Segfault or image panic signals: log category, exit code 139, or image/binary keywords
+        if log_category in ("panic", "image_error") or exit_code == 139 or any(kw in combined_text for kw in ("segfault", "segmentation", "panic", "image", "binary", "corrupt")):
+            return "bad_image"
+
+        # Exit code 1 with no other signal — check logs text in evidence
+        evidence_text = " ".join(
+            (e.content or "").lower() for e in (incident.evidence or [])
+        )
+        if any(kw in evidence_text for kw in ("secret", "config", "env", "missing", "not found", "credentials")):
+            return "missing_config"
+
+        return "unknown"
+
     def _generate_rule_based(self, incident: Incident) -> Dict[str, Any]:
         """Generate a rule-based remediation plan.
 
@@ -239,10 +427,28 @@ class RemediationEngine:
             Dict with remediation plan data.
         """
         incident_type = incident.incident_type.value
-        raw_steps = DEFAULT_REMEDIATIONS.get(
-            incident_type,
-            DEFAULT_REMEDIATIONS["CrashLoopBackOff"],
-        )
+
+        if incident_type == "CrashLoopBackOff":
+            strategy_key = self._select_crashloop_strategy(incident)
+            raw_steps = _CRASHLOOP_STRATEGIES[strategy_key]
+            strategy_label = {
+                "oom": "OOMKill-induced CrashLoop",
+                "missing_config": "missing secret/config CrashLoop",
+                "bad_image": "broken image/rollback CrashLoop",
+                "unknown": "CrashLoop (root cause unconfirmed — diagnose first)",
+            }[strategy_key]
+            summary = (
+                f"CrashLoopBackOff remediation ({strategy_label}) "
+                f"for {incident.namespace}/{incident.workload}"
+            )
+            rollback_plan = f"kubectl rollout undo deployment/{incident.workload} -n {incident.namespace}"
+        else:
+            raw_steps = DEFAULT_REMEDIATIONS.get(
+                incident_type,
+                _CRASHLOOP_STRATEGIES["unknown"],
+            )
+            summary = f"Rule-based remediation for {incident_type} in {incident.namespace}/{incident.workload}"
+            rollback_plan = f"kubectl rollout undo deployment/{incident.workload} -n {incident.namespace}"
 
         # Substitute template variables
         steps = []
@@ -257,10 +463,10 @@ class RemediationEngine:
             steps.append(step)
 
         return {
-            "summary": f"Rule-based remediation for {incident_type} in {incident.namespace}/{incident.workload}",
+            "summary": summary,
             "steps": steps,
             "estimated_downtime_secs": 0,
-            "rollback_plan": f"kubectl rollout undo deployment/{incident.workload} -n {incident.namespace}",
+            "rollback_plan": rollback_plan,
         }
 
     def _build_steps(self, raw_steps: List[Dict[str, Any]]) -> List[RemediationStep]:

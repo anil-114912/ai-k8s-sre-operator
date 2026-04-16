@@ -17,3 +17,5 @@ sqlalchemy==2.0.30
 scikit-learn==1.4.2
 numpy==1.26.4
 sentence-transformers==2.7.0
+kubernetes>=28.0.0
+certifi>=2024.0.0

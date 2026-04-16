@@ -17,3 +17,4 @@ data:
   WATCH_INTERVAL_SECS: {{ .Values.operator.watchIntervalSecs | quote }}
   DENIED_NAMESPACES: {{ .Values.operator.deniedNamespaces | join "," | quote }}
   DATABASE_URL: {{ .Values.database.url | quote }}
+  CLUSTER_PROVIDER: {{ .Values.cluster.provider | quote }}

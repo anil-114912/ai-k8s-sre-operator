@@ -23,10 +23,13 @@ test-cov:
 	DEMO_MODE=1 DATABASE_URL=sqlite:///./test_sre.db $(PYTHON) -m pytest tests/ -v --cov=. --cov-report=term-missing
 
 run-api:
+	DEMO_MODE=0 KUBECONFIG=/Users/AThotakura/.kube/config uvicorn api.main:app --host 0.0.0.0 --port $(PORT) --reload
+
+run-api-demo:
 	DEMO_MODE=1 uvicorn api.main:app --host 0.0.0.0 --port $(PORT) --reload
 
 run-ui:
-	DEMO_MODE=1 API_BASE_URL=http://localhost:$(PORT) streamlit run ui/streamlit_app.py --server.port $(UI_PORT)
+	API_BASE_URL=http://localhost:$(PORT) streamlit run ui/streamlit_app.py --server.port $(UI_PORT)
 
 simulate:
 	DEMO_MODE=1 $(PYTHON) -m cli.main simulate --type crashloop

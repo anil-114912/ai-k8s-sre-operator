@@ -6,9 +6,19 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+# Valid explicit provider values accepted by CLUSTER_PROVIDER env var / Helm value.
+PROVIDER_AWS = "aws"
+PROVIDER_AZURE = "azure"
+PROVIDER_GCP = "gcp"
+PROVIDER_GENERIC = "generic"
+_VALID_PROVIDERS = {PROVIDER_AWS, PROVIDER_AZURE, PROVIDER_GCP, PROVIDER_GENERIC}
+
 logger = logging.getLogger(__name__)
 
-DEMO_MODE = os.getenv("DEMO_MODE", "1") == "1"
+
+def _is_demo_mode() -> bool:
+    """Check DEMO_MODE at call time, not import time."""
+    return os.getenv("DEMO_MODE", "0").lower() in {"1", "true", "yes"}
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +415,13 @@ def _make_simulated_cluster_state() -> Dict[str, Any]:
 class _SimulatedK8s:
     """Simulated Kubernetes client returning realistic fake data."""
 
+    #: Provider is always generic for the simulated client.
+    provider: str = PROVIDER_GENERIC
+
+    def detect_provider(self) -> str:
+        """Return 'generic' — simulated cluster has no real cloud provider."""
+        return PROVIDER_GENERIC
+
     def get_cluster_state(self) -> Dict[str, Any]:
         """Return the simulated cluster state."""
         return _make_simulated_cluster_state()
@@ -481,6 +498,63 @@ class RealK8sClient:
         self._apps = kubernetes.client.AppsV1Api()
         self._batch = kubernetes.client.BatchV1Api()
 
+        # Resolve cloud provider once at startup.
+        # CLUSTER_PROVIDER env var (set via Helm values.cluster.provider) can
+        # be an explicit value (aws|azure|gcp|generic) or empty/"auto" to
+        # trigger automatic detection from node metadata.
+        env_provider = os.getenv("CLUSTER_PROVIDER", "").strip().lower()
+        if env_provider in _VALID_PROVIDERS:
+            self.provider = env_provider
+            logger.info("Cloud provider set from CLUSTER_PROVIDER env var: %s", self.provider)
+        else:
+            self.provider = self.detect_provider()
+            logger.info("Cloud provider auto-detected: %s", self.provider)
+
+    def detect_provider(self) -> str:
+        """Detect the cloud provider by inspecting node labels and providerID.
+
+        Detection heuristics (checked in order):
+        - Node ``spec.providerID`` prefix: ``aws://`` → aws, ``azure://`` → azure, ``gce://`` → gcp
+        - Node label ``eks.amazonaws.com/nodegroup`` or ``alpha.eksctl.io/cluster-name`` → aws
+        - Node label ``kubernetes.azure.com/cluster`` or ``agentpool`` → azure
+        - Node label ``cloud.google.com/gke-nodepool`` or ``topology.gke.io/zone`` → gcp
+
+        Falls back to ``generic`` if no cloud signals are found or if the node
+        list cannot be fetched.
+
+        Returns:
+            One of: "aws", "azure", "gcp", "generic"
+        """
+        try:
+            nodes = self._core.list_node(watch=False, limit=5)
+            for node in nodes.items:
+                provider_id: str = (node.spec.provider_id or "").lower()
+                labels: Dict[str, str] = node.metadata.labels or {}
+
+                # Provider ID prefix checks (most reliable signal)
+                if provider_id.startswith("aws://"):
+                    return PROVIDER_AWS
+                if provider_id.startswith("azure://"):
+                    return PROVIDER_AZURE
+                if provider_id.startswith("gce://"):
+                    return PROVIDER_GCP
+
+                # Label-based checks for clusters where providerID may be empty
+                if any(k.startswith("eks.amazonaws.com") or k.startswith("alpha.eksctl.io") for k in labels):
+                    return PROVIDER_AWS
+                if any(k in labels for k in ("kubernetes.azure.com/cluster", "agentpool",
+                                              "kubernetes.azure.com/agentpool")):
+                    return PROVIDER_AZURE
+                if any(k in labels for k in ("cloud.google.com/gke-nodepool",
+                                              "topology.gke.io/zone",
+                                              "cloud.google.com/gke-boot-disk")):
+                    return PROVIDER_GCP
+
+        except Exception as exc:
+            logger.warning("detect_provider: node list failed (%s) — defaulting to generic", exc)
+
+        return PROVIDER_GENERIC
+
     def get_cluster_state(self) -> Dict[str, Any]:
         """Fetch real cluster state from the Kubernetes API server."""
         state: Dict[str, Any] = {
@@ -540,7 +614,50 @@ class RealK8sClient:
                     },
                 })
         except Exception as exc:
-            logger.error("Failed to fetch cluster state: %s", exc)
+            import traceback
+            logger.error("RealK8sClient.get_cluster_state FAILED: %s: %s", type(exc).__name__, exc)
+            logger.error("get_cluster_state traceback:\n%s", traceback.format_exc())
+
+        # Second pass: fetch previous container logs for unhealthy pods
+        _UNHEALTHY_REASONS = {
+            "CrashLoopBackOff", "OOMKilled", "Error", "ImagePullBackOff",
+            "ErrImagePull", "CreateContainerConfigError", "CreateContainerError",
+        }
+        unhealthy_count = 0
+        for pod in state["pods"]:
+            if unhealthy_count >= 10:
+                break
+            ns = pod.get("namespace", "")
+            pod_name = pod.get("name", "")
+            for cs in pod.get("container_statuses", []):
+                if unhealthy_count >= 10:
+                    break
+                container = cs.get("name", "")
+                restart_count = cs.get("restartCount", 0)
+                waiting_reason = cs.get("state", {}).get("waiting", {}).get("reason", "")
+                last_reason = cs.get("lastState", {}).get("terminated", {}).get("reason", "")
+                is_unhealthy = (
+                    restart_count > 0
+                    or waiting_reason in _UNHEALTHY_REASONS
+                    or last_reason in _UNHEALTHY_REASONS
+                )
+                if not is_unhealthy:
+                    continue
+                log_key = f"{ns}/{pod_name}/{container}"
+                try:
+                    log_text = self._core.read_namespaced_pod_log(
+                        name=pod_name,
+                        namespace=ns,
+                        container=container,
+                        previous=True,
+                        tail_lines=80,
+                    )
+                    state["recent_logs"][log_key] = log_text.splitlines()
+                    logger.info("Fetched previous logs for %s (%d lines)", log_key, len(state["recent_logs"][log_key]))
+                    unhealthy_count += 1
+                except Exception as log_exc:
+                    logger.debug("Could not fetch logs for %s: %s", log_key, log_exc)
+
         return state
 
     @staticmethod
@@ -652,10 +769,18 @@ def get_k8s_client():
     Returns:
         Either RealK8sClient or _SimulatedK8s.
     """
-    if DEMO_MODE:
+    if _is_demo_mode():
+        logger.info("get_k8s_client: DEMO_MODE=1 — returning simulated client")
         return _SimulatedK8s()
     try:
-        return RealK8sClient()
+        client = RealK8sClient()
+        logger.info("get_k8s_client: RealK8sClient initialised successfully")
+        return client
     except Exception as exc:
-        logger.warning("Could not connect to K8s cluster (%s), using simulation", exc)
+        import traceback
+        logger.error(
+            "get_k8s_client: RealK8sClient FAILED (%s: %s) — falling back to simulation",
+            type(exc).__name__, exc,
+        )
+        logger.error("get_k8s_client traceback:\n%s", traceback.format_exc())
         return _SimulatedK8s()

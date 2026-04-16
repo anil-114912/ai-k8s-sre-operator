@@ -5,7 +5,15 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Load .env from project root so DEMO_MODE, KUBECONFIG, etc. are available
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
+except ImportError:
+    pass
 
 import click
 import httpx

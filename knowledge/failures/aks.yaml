@@ -72,6 +72,90 @@
   tags: [aks, azure, managed-identity, workload-identity, rbac, permissions]
   provider: azure
 
+- id: aks-004
+  title: "AKS node pool VMSS in degraded provisioning state"
+  scope: cluster
+  symptoms:
+    - "Node pool shows ProvisioningState: Failed or Updating"
+    - "New nodes not joining cluster after scale-out"
+    - "VMSS extension provisioning failure"
+    - "Node stuck in NotReady after scale event"
+  event_patterns:
+    - "ProvisioningFailed"
+    - "vmss"
+    - "node pool"
+    - "provisioning state"
+    - "extension"
+  log_patterns:
+    - "provisioning state"
+    - "vmss"
+    - "extension failed"
+    - "custom script extension"
+    - "node not ready"
+    - "bootstrap failed"
+  metric_patterns: []
+  root_cause: "The AKS node pool VMSS (Virtual Machine Scale Set) has a VM instance in a failed provisioning state — often caused by a VM extension failure during node bootstrap, a custom script error, or an Azure resource quota issue at the VMSS level"
+  remediation_steps:
+    - "Check node pool status: az aks nodepool show --resource-group <rg> --cluster-name <cluster> --name <nodepool>"
+    - "List VMSS instances: az vmss list-instances --resource-group <node-rg> --name <vmss-name> -o table"
+    - "Check instance model for failed extensions: az vmss get-instance-view --resource-group <node-rg> --name <vmss-name> --instance-id <id>"
+    - "Reimage the failed VMSS instance: az vmss reimage --resource-group <node-rg> --name <vmss-name> --instance-ids <id>"
+    - "If bootstrap keeps failing: delete the NotReady node and let cluster-autoscaler replace it"
+    - "Check for quota issues: az vm list-usage --location <region> -o table"
+  confidence_hints:
+    - pattern: "vmss"
+      boost: 0.35
+    - pattern: "provisioning state"
+      boost: 0.35
+    - pattern: "extension failed"
+      boost: 0.4
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [aks, azure, vmss, node-pool, provisioning, bootstrap]
+  provider: azure
+
+- id: aks-005
+  title: "AKS Workload Identity webhook not injecting credentials"
+  scope: pod
+  symptoms:
+    - "Pod missing AZURE_CLIENT_ID or AZURE_FEDERATED_TOKEN_FILE env vars"
+    - "azure-wi-webhook not mutating pod spec"
+    - "Workload Identity annotation present but credentials absent"
+  event_patterns:
+    - "webhook"
+    - "workload identity"
+    - "mutation"
+    - "azure.workload.identity"
+  log_patterns:
+    - "AZURE_CLIENT_ID"
+    - "AZURE_FEDERATED_TOKEN_FILE"
+    - "workload identity"
+    - "azure.workload.identity"
+    - "webhook"
+    - "not injected"
+    - "mutating webhook"
+  metric_patterns: []
+  root_cause: "The AKS Workload Identity mutating webhook (azure-wi-webhook) is not injecting the required environment variables and volume mounts into the pod — usually because the webhook pod is unhealthy, the pod ServiceAccount lacks the azure.workload.identity/client-id annotation, or the MutatingWebhookConfiguration is misconfigured"
+  remediation_steps:
+    - "Check webhook pod health: kubectl get pods -n azure-workload-identity-system"
+    - "Inspect webhook logs: kubectl logs -n azure-workload-identity-system -l app=azure-wi-webhook-controller-manager"
+    - "Verify ServiceAccount annotation: kubectl get sa <name> -n <namespace> -o yaml | grep azure.workload.identity"
+    - "Add annotation if missing: kubectl annotate sa <name> -n <namespace> azure.workload.identity/client-id=<client-id>"
+    - "Check pod label: pod must have label azure.workload.identity/use=true"
+    - "Verify MutatingWebhookConfiguration: kubectl get mutatingwebhookconfiguration azure-wi-webhook-mutating-webhook-configuration -o yaml"
+    - "Restart webhook deployment if unhealthy: kubectl rollout restart deployment -n azure-workload-identity-system"
+  confidence_hints:
+    - pattern: "AZURE_FEDERATED_TOKEN_FILE"
+      boost: 0.5
+    - pattern: "workload identity"
+      boost: 0.35
+    - pattern: "mutating webhook"
+      boost: 0.3
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [aks, azure, workload-identity, webhook, mutation, serviceaccount]
+  provider: azure
+
 - id: aks-003
   title: "AKS Azure Disk volume attach failure"
   scope: pod

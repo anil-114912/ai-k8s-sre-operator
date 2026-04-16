@@ -40,6 +40,12 @@ RCA_USER_TEMPLATE = """
 ## Evidence
 {evidence_text}
 
+## POD LOGS (last crash output)
+{pod_logs}
+
+## LOG ANALYSIS
+{log_analysis}
+
 ## Chronological Timeline
 {timeline_text}
 
@@ -149,6 +155,12 @@ Pod: {pod_name} | Detected: {detected_at}
 ## EVIDENCE
 {evidence_text}
 
+## POD LOGS (last crash output)
+{pod_logs}
+
+## LOG ANALYSIS
+{log_analysis}
+
 ## KNOWLEDGE BASE MATCHES
 {kb_context}
 
@@ -197,6 +209,8 @@ def rca_with_kb_and_memory(
     kb_context: str,
     memory_context: str,
     cluster_patterns: str,
+    pod_logs: str = "",
+    log_analysis: str = "",
 ) -> str:
     """Build the rich KB + memory RCA prompt.
 
@@ -214,6 +228,8 @@ def rca_with_kb_and_memory(
         kb_context: Knowledge base matches context string.
         memory_context: Similar past incidents context string.
         cluster_patterns: Cluster-specific failure pattern summary.
+        pod_logs: Raw log lines from the last container crash.
+        log_analysis: Structured log analysis summary string.
 
     Returns:
         Formatted user prompt string.
@@ -232,6 +248,8 @@ def rca_with_kb_and_memory(
         kb_context=kb_context or "No knowledge base matches found.",
         memory_context=memory_context or "No similar past incidents found.",
         cluster_patterns=cluster_patterns or "No cluster-specific patterns available.",
+        pod_logs=pod_logs or "No logs available",
+        log_analysis=log_analysis or "No log analysis available",
     )
 
 

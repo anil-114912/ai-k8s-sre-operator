@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-DEMO_MODE = os.getenv("DEMO_MODE", "1") == "1"
+
+def _is_demo_mode() -> bool:
+    return os.getenv("DEMO_MODE", "0").lower() in {"1", "true", "yes"}
 
 
 class LogsCollector:
@@ -15,7 +17,7 @@ class LogsCollector:
 
     def __init__(self) -> None:
         """Initialise the logs collector."""
-        logger.info("LogsCollector initialised (demo_mode=%s)", DEMO_MODE)
+        logger.info("LogsCollector initialised (demo_mode=%s)", _is_demo_mode())
 
     def get_pod_logs(
         self,
@@ -37,7 +39,7 @@ class LogsCollector:
         Returns:
             List of log line strings.
         """
-        if DEMO_MODE:
+        if _is_demo_mode():
             return self._simulated_logs(namespace, pod_name, container_name, previous)
 
         try:
@@ -88,6 +90,121 @@ class LogsCollector:
                 if k.startswith(key2):
                     return v
         return logs
+
+    @staticmethod
+    def analyze_logs(lines: List[str]) -> Dict[str, Any]:
+        """Analyze log lines and return structured diagnostic information.
+
+        Args:
+            lines: List of log line strings from a crashed container.
+
+        Returns:
+            Dict with error_category, key_lines, has_stack_trace,
+            suggested_cause, and confidence_boost.
+        """
+        # Keyword sets per category — checked in priority order
+        _CATEGORIES = [
+            ("oom", [
+                "out of memory", "oom", "killed", "cannot allocate memory",
+                "memory limit", "oomkilled",
+            ]),
+            ("panic", [
+                "panic:", "sigsegv", "segmentation fault", "fatal error",
+                "runtime error", "goroutine", "exception in thread",
+                "traceback (most recent",
+            ]),
+            ("db_connection", [
+                "connection refused", "dial tcp", "timeout", "econnrefused",
+                "connect: connection refused", "database", "postgres", "mysql",
+                "redis", "mongo", "unable to connect",
+            ]),
+            ("missing_config", [
+                "secret", "configmap", "env", "environment variable",
+                "not found", "no such file", "missing", "credentials",
+                "token", "password", "connection string", "database url",
+                "enoent", "keyerror", "undefined",
+            ]),
+            ("permission", [
+                "permission denied", "eacces", "forbidden", "unauthorized",
+                "access denied", "not permitted",
+            ]),
+            ("port_conflict", [
+                "address already in use", "eaddrinuse", "bind: address",
+            ]),
+            ("image_error", [
+                "exec format error", "no such file or directory",
+                "not found", "executable file not found",
+            ]),
+            ("startup_failure", [
+                "failed to start", "startup failed", "initialization failed",
+                "failed to initialize",
+            ]),
+        ]
+
+        _SUGGESTED_CAUSES = {
+            "missing_config": "Application cannot find required secret, configmap, or environment variable",
+            "db_connection": "Application cannot connect to its database or backing service",
+            "oom": "Container exceeded its memory limit and was killed by the OS",
+            "panic": "Application panicked or crashed with a fatal exception",
+            "permission": "Application lacks required filesystem or API permissions",
+            "port_conflict": "Application cannot bind to its port because it is already in use",
+            "image_error": "Container image has an incompatible binary or missing executable",
+            "startup_failure": "Application failed during its initialization or startup sequence",
+            "unknown": "Root cause could not be determined from log output alone",
+        }
+
+        combined_lower = "\n".join(lines).lower()
+
+        # Determine category
+        error_category = "unknown"
+        for cat, keywords in _CATEGORIES:
+            if any(kw in combined_lower for kw in keywords):
+                error_category = cat
+                break
+
+        # Extract key lines (ERROR/FATAL prioritized, then WARN etc.)
+        priority_keywords = {"error", "fatal", "panic", "exception", "traceback", "killed"}
+        secondary_keywords = {"warn", "failed"}
+        priority_lines: List[str] = []
+        secondary_lines: List[str] = []
+        for line in lines:
+            ll = line.lower()
+            if any(kw in ll for kw in priority_keywords):
+                priority_lines.append(line)
+            elif any(kw in ll for kw in secondary_keywords):
+                secondary_lines.append(line)
+        key_lines = (priority_lines + secondary_lines)[:10]
+
+        # Detect stack traces
+        has_stack_trace = False
+        for line in lines:
+            stripped = line.lstrip()
+            if (
+                stripped.startswith("at ")
+                or stripped.startswith("File ")
+                or "goroutine " in line
+                or "Traceback" in line
+            ):
+                has_stack_trace = True
+                break
+
+        # Compute confidence boost
+        if error_category == "unknown":
+            confidence_boost = 0.0
+        elif error_category == "startup_failure":
+            confidence_boost = 0.05
+        else:
+            confidence_boost = 0.15
+        if has_stack_trace:
+            confidence_boost = min(0.2, confidence_boost + 0.05)
+
+        return {
+            "error_category": error_category,
+            "key_lines": key_lines,
+            "has_stack_trace": has_stack_trace,
+            "suggested_cause": _SUGGESTED_CAUSES.get(error_category, _SUGGESTED_CAUSES["unknown"]),
+            "confidence_boost": confidence_boost,
+        }
 
     @staticmethod
     def _simulated_logs(

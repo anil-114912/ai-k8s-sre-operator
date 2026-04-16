@@ -82,6 +82,20 @@ class RCAEngine:
                 for p in cluster_patterns[:5]
             )
 
+        # Extract log content from raw signals for LLM
+        raw = incident.raw_signals or {}
+        log_lines = raw.get("recent_logs", [])
+        pod_logs_str = "\n".join(log_lines[:50]) if log_lines else "No logs available"
+        log_analysis_dict = raw.get("log_analysis", {})
+        if log_analysis_dict and isinstance(log_analysis_dict, dict):
+            log_analysis_str = (
+                f"Category: {log_analysis_dict.get('error_category', 'unknown')}\n"
+                f"Suggested cause: {log_analysis_dict.get('suggested_cause', '')}\n"
+                f"Has stack trace: {log_analysis_dict.get('has_stack_trace', False)}"
+            )
+        else:
+            log_analysis_str = "No log analysis available"
+
         # Choose prompt: enhanced KB+memory if context provided, else legacy
         if kb_context is not None or memory_context is not None:
             system_prompt = RCA_KB_MEMORY_SYSTEM_PROMPT
@@ -99,6 +113,8 @@ class RCAEngine:
                 kb_context=kb_context or "",
                 memory_context=memory_context or self._format_similar_incidents(similar_incidents or []),
                 cluster_patterns=cluster_patterns_str,
+                pod_logs=pod_logs_str,
+                log_analysis=log_analysis_str,
             )
         else:
             # Legacy prompt path — preserves backward compatibility
@@ -117,6 +133,8 @@ class RCAEngine:
                 symptom_signals=symptom_signals,
                 contributing_factor_signals=contributing_signals,
                 evidence_text=evidence_text,
+                pod_logs=pod_logs_str,
+                log_analysis=log_analysis_str,
                 timeline_text=timeline_text,
                 similar_incidents_text=similar_text,
             )
@@ -148,6 +166,15 @@ class RCAEngine:
             )
         except Exception:
             pass  # Non-critical — use raw confidence if learning loop unavailable
+
+        # Apply confidence boost from log analysis clarity
+        confidence_boost = (incident.raw_signals or {}).get("log_analysis", {})
+        if isinstance(confidence_boost, dict):
+            confidence_boost = confidence_boost.get("confidence_boost", 0.0)
+        else:
+            confidence_boost = 0.0
+        if confidence_boost > 0:
+            incident.confidence = min(1.0, incident.confidence + confidence_boost)
 
         incident.ai_explanation = analysis.get("explanation", "")
         incident.contributing_factors = analysis.get("contributing_factors", [])

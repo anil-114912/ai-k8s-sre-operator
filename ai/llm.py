@@ -8,10 +8,11 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-DEMO_MODE = os.getenv("DEMO_MODE", "1") == "1"
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+def _is_demo_mode() -> bool:
+    """Check DEMO_MODE at call time, not import time."""
+    return os.getenv("DEMO_MODE", "0").lower() in {"1", "true", "yes"}
+
 
 DEFAULT_ANTHROPIC_MODEL = "claude-3-5-sonnet-20241022"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
@@ -319,8 +320,9 @@ class LLMClient:
 
     def __init__(self) -> None:
         """Initialise the LLM client based on environment configuration."""
-        self.provider = LLM_PROVIDER
-        self.demo_mode = DEMO_MODE
+        # Read at init time (not import time) so .env is already loaded
+        self.provider = os.getenv("LLM_PROVIDER", "anthropic")
+        self.demo_mode = _is_demo_mode()
         self._anthropic_client = None
         self._openai_client = None
 
@@ -328,29 +330,38 @@ class LLMClient:
             self._init_provider()
 
         logger.info(
-            "LLMClient initialised: provider=%s demo_mode=%s", self.provider, self.demo_mode
+            "LLMClient initialised: provider=%s demo_mode=%s has_anthropic=%s",
+            self.provider, self.demo_mode, self._anthropic_client is not None,
         )
 
     def _init_provider(self) -> None:
         """Initialise the appropriate LLM provider client."""
-        if self.provider == "anthropic" and ANTHROPIC_API_KEY:
+        # Read keys at call time so they reflect the loaded .env
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+        openai_key = os.getenv("OPENAI_API_KEY", "")
+
+        if self.provider == "anthropic" and anthropic_key:
             try:
                 import anthropic
-                self._anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-                logger.info("Anthropic client initialised")
+                self._anthropic_client = anthropic.Anthropic(api_key=anthropic_key)
+                logger.info("Anthropic client initialised (model=%s)", DEFAULT_ANTHROPIC_MODEL)
             except ImportError:
-                logger.warning("anthropic package not installed — falling back to demo mode")
+                logger.warning("anthropic package not installed — pip install anthropic")
                 self.demo_mode = True
-        elif self.provider == "openai" and OPENAI_API_KEY:
+        elif self.provider == "openai" and openai_key:
             try:
                 import openai
-                self._openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
-                logger.info("OpenAI client initialised")
+                self._openai_client = openai.OpenAI(api_key=openai_key)
+                logger.info("OpenAI client initialised (model=%s)", DEFAULT_OPENAI_MODEL)
             except ImportError:
-                logger.warning("openai package not installed — falling back to demo mode")
+                logger.warning("openai package not installed — pip install openai")
                 self.demo_mode = True
         else:
-            logger.info("No API key configured — using rule-based fallback")
+            logger.info(
+                "No API key set for provider '%s' — using rule-based fallback. "
+                "Set ANTHROPIC_API_KEY in .env to enable AI analysis.",
+                self.provider,
+            )
             self.demo_mode = True
 
     def chat(self, system: str, user: str, model: Optional[str] = None) -> str:
@@ -576,4 +587,15 @@ def get_llm_client() -> LLMClient:
     global _client
     if _client is None:
         _client = LLMClient()
+    return _client
+
+
+def reset_llm_client() -> LLMClient:
+    """Force-recreate the LLM client singleton (e.g. after updating API key).
+
+    Returns:
+        New LLMClient instance.
+    """
+    global _client
+    _client = LLMClient()
     return _client
