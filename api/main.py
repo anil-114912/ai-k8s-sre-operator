@@ -50,7 +50,7 @@ from knowledge.feedback_store import FeedbackStore
 from knowledge.incident_store import IncidentStore
 from knowledge.learning import ContextBuilder
 from models.cluster_resource import ClusterHealthSummary
-from models.incident import Incident, IncidentStatus, IncidentType, Severity
+from models.incident import Evidence, Incident, IncidentStatus, IncidentType, Severity
 from models.remediation import RemediationPlan, RemediationStatus
 from providers.kubernetes import get_k8s_client
 from remediations.policy_guardrails import PolicyGuardrails
@@ -867,8 +867,6 @@ async def scan_cluster(
                 incident.raw_signals["recent_logs"] = log_lines[:50]
                 # Add key log lines as evidence
                 if analysis.get("key_lines"):
-                    from models.incident import Evidence
-
                     incident.evidence = incident.evidence or []
                     incident.evidence.append(
                         Evidence(
@@ -878,8 +876,6 @@ async def scan_cluster(
                         )
                     )
                 if analysis.get("suggested_cause") and analysis.get("error_category") != "unknown":
-                    from models.incident import Evidence
-
                     incident.evidence = incident.evidence or []
                     incident.evidence.append(
                         Evidence(
@@ -974,3 +970,273 @@ async def cluster_summary() -> Dict[str, Any]:
         summary=f"{active_incidents} active incidents, {crashloop} crashlooping pods",
     )
     return summary.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# APM endpoints — receive reports from sidecar agents
+# ---------------------------------------------------------------------------
+
+# In-memory APM store: service_key → latest report + aggregated stats
+# In production this would be persisted to the SQLite/Postgres store.
+_apm_reports: Dict[str, Any] = {}
+_apm_error_patterns: Dict[str, Any] = {}  # pattern_id → aggregated counts
+
+
+class APMIngestRequest(BaseModel):
+    """APM report submitted by the sidecar agent every report_interval_secs."""
+
+    pod_name: str
+    namespace: str
+    service_name: str
+    report_window_secs: int = 30
+    error_count: int = 0
+    warning_count: int = 0
+    total_lines: int = 0
+    error_rate: float = 0.0
+    patterns_detected: List[Dict[str, Any]] = []
+    metrics: Dict[str, Any] = {}
+    novel_errors: List[str] = []
+    agent_version: str = "unknown"
+
+
+class APMLearnRequest(BaseModel):
+    """Novel error lines submitted by the sidecar agent for learning."""
+
+    pod_name: str
+    namespace: str
+    service_name: str
+    novel_error_lines: List[str]
+    total_novel_count: int = 0
+    agent_version: str = "unknown"
+
+
+def _apm_service_key(namespace: str, service: str) -> str:
+    return f"{namespace}/{service}"
+
+
+def _apm_health_score(error_rate: float, p99_ms: Optional[float], crash_count: int) -> float:
+    """Compute a 0–100 health score from APM metrics."""
+    score = 100.0
+    score -= min(error_rate * 200, 40)  # up to -40 for 20%+ error rate
+    if p99_ms and p99_ms > 1000:
+        score -= min((p99_ms - 1000) / 100, 20)  # up to -20 for very slow p99
+    score -= min(crash_count * 5, 30)  # up to -30 for crashes
+    return round(max(0.0, min(100.0, score)), 1)
+
+
+@app.post("/api/v1/apm/ingest", status_code=202)
+async def apm_ingest(report: APMIngestRequest) -> Dict[str, Any]:
+    """Receive an APM report from a sidecar agent.
+
+    The agent calls this every ``report_interval_secs`` (default 30s).
+    The operator stores the report, aggregates error patterns, and creates
+    APM incidents when error thresholds are exceeded.
+    """
+    key = _apm_service_key(report.namespace, report.service_name)
+    now_str = datetime.utcnow().isoformat()
+
+    # Aggregate pattern counts
+    for p in report.patterns_detected:
+        pid = p.get("pattern_id", "unknown")
+        if pid not in _apm_error_patterns:
+            _apm_error_patterns[pid] = {
+                "pattern_id": pid,
+                "pattern_name": p.get("pattern_name", pid),
+                "total_count": 0,
+                "services": set(),
+                "last_seen": now_str,
+                "severity": p.get("severity", "medium"),
+                "incident_type": p.get("incident_type", "APM_GENERIC"),
+                "sample": p.get("sample", ""),
+                "remediation_hint": p.get("remediation_hint", ""),
+            }
+        _apm_error_patterns[pid]["total_count"] += p.get("count", 1)
+        _apm_error_patterns[pid]["services"].add(key)
+        _apm_error_patterns[pid]["last_seen"] = now_str
+
+    # Compute health score
+    p99 = report.metrics.get("latency_p99_ms")
+    crash_count = sum(1 for p in report.patterns_detected if p.get("severity") == "critical")
+    health = _apm_health_score(report.error_rate, p99, crash_count)
+
+    # Store latest service state
+    _apm_reports[key] = {
+        "service_name": report.service_name,
+        "namespace": report.namespace,
+        "pod_name": report.pod_name,
+        "health_score": health,
+        "error_count": report.error_count,
+        "warning_count": report.warning_count,
+        "total_lines": report.total_lines,
+        "error_rate": report.error_rate,
+        "patterns_detected": report.patterns_detected,
+        "metrics": report.metrics,
+        "last_report": now_str,
+        "agent_version": report.agent_version,
+    }
+
+    # Auto-create APM incidents for high-severity patterns
+    incidents_created = []
+    for p in report.patterns_detected:
+        if p.get("severity") in ("critical", "high") and p.get("count", 0) >= 1:
+            incident = Incident(
+                title=f"APM: {report.service_name} — {p.get('pattern_name', p.get('pattern_id'))} "
+                f"({p.get('count', 0)} occurrences in {report.report_window_secs}s)",
+                incident_type=p.get("incident_type", "APM_GENERIC"),
+                severity=Severity.critical if p.get("severity") == "critical" else Severity.high,
+                namespace=report.namespace,
+                workload=report.service_name,
+                pod_name=report.pod_name,
+                raw_signals={
+                    "error_count": report.error_count,
+                    "error_rate": report.error_rate,
+                    "pattern": p,
+                    "metrics": report.metrics,
+                    "source": "apm_agent",
+                },
+            )
+            incident.evidence.append(
+                Evidence(
+                    source="apm_agent",
+                    content=f"{p.get('count', 0)}x {p.get('pattern_name')}: {p.get('sample', '')[:200]}",
+                    relevance=0.9,
+                )
+            )
+            _incidents[incident.id] = incident
+            _store.save_incident(incident)
+            incidents_created.append(incident.id)
+            logger.info(
+                "APM incident created: %s (%s) in %s/%s",
+                p.get("pattern_id"),
+                p.get("severity"),
+                report.namespace,
+                report.service_name,
+            )
+
+    # Feed novel errors into the learning store
+    if report.novel_errors:
+        _learning_loop.capture_unknown_errors(
+            log_lines=report.novel_errors[:10],
+            namespace=report.namespace,
+            workload=report.service_name,
+        )
+
+    return {
+        "accepted": True,
+        "service_key": key,
+        "health_score": health,
+        "incidents_created": len(incidents_created),
+        "incident_ids": incidents_created,
+    }
+
+
+@app.get("/api/v1/apm/services")
+async def apm_services(
+    namespace: Optional[str] = Query(None, description="Filter by namespace"),
+) -> List[Dict[str, Any]]:
+    """List all services currently reporting APM data, with health scores."""
+    services = []
+    for key, data in _apm_reports.items():
+        if namespace and data.get("namespace") != namespace:
+            continue
+        services.append(
+            {
+                "service_key": key,
+                "service_name": data["service_name"],
+                "namespace": data["namespace"],
+                "health_score": data["health_score"],
+                "error_rate": data["error_rate"],
+                "error_count": data["error_count"],
+                "last_report": data["last_report"],
+                "agent_version": data.get("agent_version"),
+                "top_patterns": [
+                    p.get("pattern_name") for p in data.get("patterns_detected", [])[:3]
+                ],
+            }
+        )
+    # Sort by health score ascending (sickest first)
+    services.sort(key=lambda s: s["health_score"])
+    return services
+
+
+@app.get("/api/v1/apm/services/{service_name}")
+async def apm_service_detail(
+    service_name: str,
+    namespace: str = Query("default"),
+) -> Dict[str, Any]:
+    """Get full APM detail for a specific service."""
+    key = _apm_service_key(namespace, service_name)
+    if key not in _apm_reports:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No APM data for {key}. Is the sidecar agent running?",
+        )
+    data = dict(_apm_reports[key])
+    # Add pattern history
+    related_patterns = {
+        pid: {**info, "services": list(info["services"])}
+        for pid, info in _apm_error_patterns.items()
+        if key in info.get("services", set())
+    }
+    data["pattern_history"] = related_patterns
+    return data
+
+
+@app.get("/api/v1/apm/errors")
+async def apm_errors(
+    namespace: Optional[str] = Query(None),
+    severity: Optional[str] = Query(None, description="critical | high | medium | low"),
+    limit: int = Query(20, ge=1, le=100),
+) -> List[Dict[str, Any]]:
+    """Aggregate view of all error patterns seen across all services."""
+    results = []
+    for pid, info in _apm_error_patterns.items():
+        if severity and info.get("severity") != severity:
+            continue
+        services_list = list(info.get("services", set()))
+        if namespace:
+            services_list = [s for s in services_list if s.startswith(f"{namespace}/")]
+            if not services_list:
+                continue
+        results.append(
+            {
+                "pattern_id": pid,
+                "pattern_name": info["pattern_name"],
+                "total_count": info["total_count"],
+                "severity": info["severity"],
+                "incident_type": info["incident_type"],
+                "affected_services": services_list,
+                "last_seen": info["last_seen"],
+                "sample": info.get("sample", "")[:200],
+                "remediation_hint": info.get("remediation_hint", ""),
+            }
+        )
+    # Sort by total_count descending
+    results.sort(key=lambda r: r["total_count"], reverse=True)
+    return results[:limit]
+
+
+@app.post("/api/v1/apm/learn", status_code=202)
+async def apm_learn(request: APMLearnRequest) -> Dict[str, Any]:
+    """Receive novel (unrecognised) error lines from the sidecar agent.
+
+    Lines are passed to the learning loop which clusters them,
+    adds them to the learned pattern store, and eventually promotes
+    recurring patterns to the knowledge base.
+    """
+    valid_lines = [line for line in request.novel_error_lines[:20] if line.strip()]
+    captured = len(valid_lines)
+    if valid_lines:
+        _learning_loop.capture_unknown_errors(
+            log_lines=valid_lines,
+            namespace=request.namespace,
+            workload=request.service_name,
+        )
+
+    logger.info(
+        "APM learn: captured %d novel lines from %s/%s",
+        captured,
+        request.namespace,
+        request.service_name,
+    )
+    return {"accepted": True, "lines_captured": captured}

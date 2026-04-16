@@ -23,7 +23,7 @@ test-cov:
 	DEMO_MODE=1 DATABASE_URL=sqlite:///./test_sre.db $(PYTHON) -m pytest tests/ -v --cov=. --cov-report=term-missing
 
 run-api:
-	DEMO_MODE=0 KUBECONFIG=/Users/AThotakura/.kube/config uvicorn api.main:app --host 0.0.0.0 --port $(PORT) --reload
+	uvicorn api.main:app --host 0.0.0.0 --port $(PORT) --reload
 
 run-api-demo:
 	DEMO_MODE=1 uvicorn api.main:app --host 0.0.0.0 --port $(PORT) --reload

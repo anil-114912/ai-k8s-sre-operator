@@ -1,0 +1,288 @@
+# Built-in application error patterns for the AI SRE sidecar agent.
+# These are matched against application log lines in real time.
+#
+# Fields:
+#   id               unique pattern identifier
+#   name             human-readable name
+#   pattern          Python regex (case-insensitive by default)
+#   severity         critical | high | medium | low
+#   incident_type    type used when creating an incident in the operator
+#   count_threshold  number of matches per window before creating an incident (default: 1)
+#   window_secs      rolling window for count_threshold (default: 30)
+#   track_trend      if true, agent tracks count over time for leak detection
+#   remediation_hint short hint surfaced in the incident (optional)
+
+# ---------------------------------------------------------------------------
+# Exceptions and crashes
+# ---------------------------------------------------------------------------
+
+- id: python_traceback
+  name: "Python exception traceback"
+  pattern: "Traceback \\(most recent call last\\)"
+  severity: high
+  incident_type: APM_EXCEPTION
+  remediation_hint: "Check the full traceback in pod logs: kubectl logs <pod> -n <ns> --previous"
+
+- id: python_assertion_error
+  name: "Python AssertionError"
+  pattern: "AssertionError"
+  severity: medium
+  incident_type: APM_EXCEPTION
+  count_threshold: 3
+
+- id: java_exception
+  name: "Java/JVM exception"
+  pattern: "(java|javax|org|com|io|net)\\.[a-zA-Z.]+Exception(:\\s|$)"
+  severity: high
+  incident_type: APM_EXCEPTION
+  count_threshold: 3
+
+- id: java_error
+  name: "Java/JVM Error"
+  pattern: "(java|javax)\\.[a-zA-Z.]+Error(:\\s|$)"
+  severity: critical
+  incident_type: APM_CRASH
+
+- id: go_panic
+  name: "Go panic"
+  pattern: "^panic:|goroutine \\d+ \\[running\\]"
+  severity: critical
+  incident_type: APM_CRASH
+  remediation_hint: "Go panic causes pod crash. Check GOGC and memory limits."
+
+- id: nodejs_uncaught
+  name: "Node.js uncaught exception"
+  pattern: "UnhandledPromiseRejection|uncaughtException|Error: ENOENT|TypeError:|ReferenceError:"
+  severity: high
+  incident_type: APM_EXCEPTION
+  count_threshold: 3
+
+- id: ruby_exception
+  name: "Ruby runtime error"
+  pattern: "(RuntimeError|NoMethodError|ArgumentError|StandardError) \\("
+  severity: high
+  incident_type: APM_EXCEPTION
+  count_threshold: 3
+
+- id: rust_panic
+  name: "Rust thread panic"
+  pattern: "thread '.*' panicked at"
+  severity: critical
+  incident_type: APM_CRASH
+
+- id: generic_fatal
+  name: "Fatal / panic keyword"
+  pattern: "\\bFATAL\\b|\\bfatal error\\b|segmentation fault|core dumped"
+  severity: critical
+  incident_type: APM_CRASH
+
+- id: generic_oom
+  name: "Application out of memory"
+  pattern: "OutOfMemoryError|MemoryError|cannot allocate memory|out of memory"
+  severity: critical
+  incident_type: APM_OOM_APP
+  remediation_hint: "Increase container memory limits or reduce heap/batch size"
+
+# ---------------------------------------------------------------------------
+# HTTP errors
+# ---------------------------------------------------------------------------
+
+- id: http_5xx
+  name: "HTTP 5xx error responses"
+  pattern: "\\b(500|502|503|504|505)\\b.*(Internal Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)"
+  severity: high
+  incident_type: APM_HTTP_ERROR
+  count_threshold: 5
+  window_secs: 30
+  remediation_hint: "Check downstream service health and pod readiness probes"
+
+- id: http_5xx_short
+  name: "HTTP 5xx (short format)"
+  pattern: "status[_\\s=:]+5[0-9]{2}|HTTP/[0-9.]+ 5[0-9]{2}"
+  severity: high
+  incident_type: APM_HTTP_ERROR
+  count_threshold: 5
+  window_secs: 30
+
+- id: http_429
+  name: "HTTP 429 rate limiting"
+  pattern: "429 Too Many Requests|rate.?limit.*(exceeded|reached)|quota.*exceeded"
+  severity: medium
+  incident_type: APM_RATE_LIMITED
+  count_threshold: 10
+  remediation_hint: "Implement exponential backoff and check rate limit configuration"
+
+- id: connection_refused
+  name: "Connection refused"
+  pattern: "ECONNREFUSED|connection refused|Connection refused"
+  severity: high
+  incident_type: APM_CONNECT_FAIL
+  count_threshold: 3
+  remediation_hint: "Target service may be down — check pod status and service endpoints"
+
+- id: connection_reset
+  name: "Connection reset"
+  pattern: "ECONNRESET|connection reset by peer|Connection reset"
+  severity: medium
+  incident_type: APM_CONNECT_FAIL
+  count_threshold: 5
+
+- id: timeout
+  name: "Request / operation timeout"
+  pattern: "timed? ?out|ETIMEDOUT|deadline exceeded|context deadline|read timeout|write timeout"
+  severity: high
+  incident_type: APM_TIMEOUT
+  count_threshold: 3
+  remediation_hint: "Check network latency, downstream service SLAs, and timeout configuration"
+
+- id: circuit_breaker
+  name: "Circuit breaker open"
+  pattern: "circuit breaker (open|tripped)|circuit open|fallback triggered"
+  severity: high
+  incident_type: APM_CIRCUIT_OPEN
+  remediation_hint: "Downstream service is failing — circuit breaker protecting the caller. Fix the downstream issue first."
+
+# ---------------------------------------------------------------------------
+# Database
+# ---------------------------------------------------------------------------
+
+- id: db_pool_exhausted
+  name: "Database connection pool exhausted"
+  pattern: "connection pool (exhausted|full)|too many connections|max_connections|pool size.*exceeded"
+  severity: critical
+  incident_type: APM_DB_POOL
+  remediation_hint: "Increase pool size, add read replicas, or reduce connection leak. Check for unclosed connections."
+
+- id: db_slow_query
+  name: "Slow database query"
+  pattern: "slow (query|statement)|query (took|time).*[0-9]+\\.[0-9]+s|execution time: [0-9]{4,}"
+  severity: medium
+  incident_type: APM_SLOW_QUERY
+  track_trend: true
+  remediation_hint: "Review query execution plan, add missing indexes, or add caching"
+
+- id: db_connect_failed
+  name: "Database connection failed"
+  pattern: "could not connect to (server|database|postgres|mysql|mongo)|OperationalError.*connect|FATAL.*database"
+  severity: critical
+  incident_type: APM_DB_CONNECT
+  remediation_hint: "Check database pod health, network policies, and credentials"
+
+- id: db_deadlock
+  name: "Database deadlock"
+  pattern: "deadlock (detected|found)|lock wait timeout exceeded|Deadlock found when trying to get lock"
+  severity: high
+  incident_type: APM_DEADLOCK
+  remediation_hint: "Review transaction ordering and add retry logic for deadlocked transactions"
+
+- id: db_auth_failed
+  name: "Database authentication failed"
+  pattern: "authentication failed for user|Access denied for user|password authentication failed"
+  severity: critical
+  incident_type: APM_DB_AUTH
+  remediation_hint: "Verify database credentials in secrets and check user permissions"
+
+- id: db_migration_failed
+  name: "Database migration failed"
+  pattern: "migration.*failed|alembic.*error|flyway.*error|migrate.*error"
+  severity: critical
+  incident_type: APM_DB_MIGRATE
+  remediation_hint: "Migration failure may leave schema in inconsistent state. Check migration logs carefully before retrying."
+
+# ---------------------------------------------------------------------------
+# Memory and resources
+# ---------------------------------------------------------------------------
+
+- id: memory_leak_signal
+  name: "Memory usage growing (potential leak)"
+  pattern: "heap.*growing|memory usage.*[89][0-9]%|GC overhead limit exceeded|retained.*heap"
+  severity: medium
+  incident_type: APM_MEMORY_LEAK
+  track_trend: true
+  remediation_hint: "Profile heap allocation. Check for unbounded caches, listener leaks, or circular references."
+
+- id: fd_leak
+  name: "File descriptor leak"
+  pattern: "too many open files|EMFILE|file descriptor (limit|leak)"
+  severity: high
+  incident_type: APM_FD_LEAK
+  remediation_hint: "Increase ulimit or fix resource leak — ensure files/sockets are closed in finally blocks"
+
+- id: thread_pool_exhausted
+  name: "Thread pool exhausted"
+  pattern: "thread pool (exhausted|full)|executor (rejected|queue full|overflow)|RejectedExecutionException"
+  severity: high
+  incident_type: APM_THREAD_POOL
+  remediation_hint: "Increase thread pool size or reduce task processing time. Check for blocking I/O in async threads."
+
+- id: disk_full
+  name: "Disk full or quota exceeded"
+  pattern: "no space left on device|ENOSPC|disk.*(full|quota exceeded)|write.*failed.*space"
+  severity: critical
+  incident_type: APM_DISK_FULL
+  remediation_hint: "Free disk space or increase PVC size. Check for log file accumulation."
+
+# ---------------------------------------------------------------------------
+# Auth and config
+# ---------------------------------------------------------------------------
+
+- id: auth_failure
+  name: "Authentication failure spike"
+  pattern: "401 Unauthorized|403 Forbidden|authentication (failed|error)|invalid (token|credentials|api.?key)"
+  severity: medium
+  incident_type: APM_AUTH_FAIL
+  count_threshold: 10
+  window_secs: 60
+  remediation_hint: "Check token expiry, secret rotation, and RBAC policies"
+
+- id: missing_config
+  name: "Missing configuration or environment variable"
+  pattern: "env(ironment)? var(iable)? .* not (set|found)|config key .* (missing|not found)|required.*not.*configured"
+  severity: high
+  incident_type: APM_CONFIG_MISS
+  remediation_hint: "Check ConfigMap and Secret mounts. Verify all required env vars are set."
+
+- id: missing_secret
+  name: "Missing secret or credential"
+  pattern: "secret .* not found|key .* does not exist|credential .* missing|api.?key .* (empty|missing|not set)"
+  severity: critical
+  incident_type: APM_SECRET_MISS
+  remediation_hint: "Ensure the required Kubernetes Secret exists and is mounted correctly"
+
+# ---------------------------------------------------------------------------
+# Message queues and caches
+# ---------------------------------------------------------------------------
+
+- id: queue_backlog
+  name: "Message queue consumer lag"
+  pattern: "consumer lag [0-9]{4,}|queue depth [0-9]{4,}|messages pending [0-9]{4,}|backlog.*[0-9]{4,}"
+  severity: medium
+  incident_type: APM_QUEUE_BACKLOG
+  track_trend: true
+  remediation_hint: "Scale up consumer replicas or investigate slow message processing"
+
+- id: cache_failure
+  name: "Cache connection failure"
+  pattern: "redis.*(connection|refused|timeout|error)|memcached.*(error|refused|failed)|cache (miss rate|unavailable)"
+  severity: high
+  incident_type: APM_CACHE_FAIL
+  count_threshold: 3
+  remediation_hint: "Check Redis/Memcached pod health and network connectivity"
+
+# ---------------------------------------------------------------------------
+# General application health
+# ---------------------------------------------------------------------------
+
+- id: startup_failed
+  name: "Application startup failure"
+  pattern: "failed to start|startup (failed|error)|application.*could not (start|initialize)|init.*failed"
+  severity: critical
+  incident_type: APM_STARTUP_FAIL
+  remediation_hint: "Application failed during startup. Check init sequence and dependency availability."
+
+- id: health_check_fail
+  name: "Internal health check failing"
+  pattern: "health.?check.*(fail|unhealthy|error)|readiness.*(fail|false)|liveness.*(fail|false)"
+  severity: high
+  incident_type: APM_HEALTH_FAIL
+  remediation_hint: "Application is reporting itself unhealthy. Check internal health check logic and dependencies."

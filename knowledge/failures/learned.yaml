@@ -49,5 +49,5 @@
   learned_from_namespace: production
   learned_from_workload: test-api
   learned_at: '2026-04-12T05:30:10.314807+00:00'
-  feedback_count: 1
-  success_count: 1
+  feedback_count: 4
+  success_count: 4

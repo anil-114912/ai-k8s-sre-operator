@@ -1,0 +1,140 @@
+# Application-level failure patterns.
+# These are matched against APM incident descriptions submitted by the sidecar agent.
+# They complement the infrastructure patterns by covering application-layer root causes.
+
+- id: app-001
+  title: "Application — database connection pool exhausted"
+  scope: pod
+  symptoms:
+    - "Connection pool exhausted in application logs"
+    - "too many connections to database"
+    - "Requests failing with DB unavailable errors"
+    - "APM agent reports APM_DB_POOL incident type"
+  event_patterns:
+    - "connection pool"
+    - "too many connections"
+    - "pool exhausted"
+  log_patterns:
+    - "connection pool exhausted"
+    - "too many connections"
+    - "max_connections"
+    - "pool size exceeded"
+    - "HikariPool"
+    - "pgbouncer"
+    - "FATAL: remaining connection slots"
+  metric_patterns:
+    - "db_connection_pool_active == db_connection_pool_max"
+  root_cause: "The application's database connection pool is fully saturated — all connections are in use and new requests are queued or rejected. Common causes: slow queries holding connections, insufficient pool size, or connection leaks where connections are not returned to the pool."
+  remediation_steps:
+    - "Check current connection count: SELECT count(*) FROM pg_stat_activity WHERE datname='<db>' (PostgreSQL)"
+    - "Identify long-running queries: SELECT pid, query, query_start FROM pg_stat_activity ORDER BY query_start"
+    - "Kill blocking queries if safe: SELECT pg_terminate_backend(<pid>)"
+    - "Increase pool size in application config (e.g. spring.datasource.hikari.maximum-pool-size)"
+    - "Add connection pool monitoring: alert when pool_active / pool_max > 80%"
+    - "Check for connection leaks — ensure all DB calls use try/finally or context managers"
+    - "Consider adding a connection pooler (PgBouncer for PostgreSQL, ProxySQL for MySQL)"
+    - "Scale up the database if query throughput is the root issue"
+  confidence_hints:
+    - pattern: "connection pool exhausted"
+      boost: 0.5
+    - pattern: "too many connections"
+      boost: 0.4
+    - pattern: "HikariPool"
+      boost: 0.4
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [application, database, connection-pool, hikari, pgbouncer, performance]
+  provider: generic
+
+- id: app-002
+  title: "Application — HTTP 5xx error spike from downstream dependency"
+  scope: pod
+  symptoms:
+    - "Application logs showing 502/503/504 responses"
+    - "Upstream service calls failing"
+    - "Error rate spike detected by APM agent"
+    - "APM_HTTP_ERROR incidents in the operator"
+  event_patterns:
+    - "HTTP 5xx"
+    - "502"
+    - "503"
+    - "504"
+    - "upstream"
+  log_patterns:
+    - "502 Bad Gateway"
+    - "503 Service Unavailable"
+    - "504 Gateway Timeout"
+    - "upstream connect error"
+    - "connect ECONNREFUSED"
+    - "service unavailable"
+  metric_patterns:
+    - "http_requests_total{status=~'5..'} / http_requests_total > 0.05"
+  root_cause: "The application is receiving a spike of HTTP 5xx responses from a downstream dependency. This could indicate the dependency is down, overloaded, or experiencing network issues. The calling application itself may not be the root cause."
+  remediation_steps:
+    - "Identify the failing downstream service from the error messages"
+    - "Check the health of that service: kubectl get pods -n <namespace> | grep <service-name>"
+    - "Check its logs: kubectl logs -n <namespace> -l app=<service-name> --tail=100"
+    - "Check circuit breaker state if one is configured"
+    - "Implement retry logic with exponential backoff for transient 503/504 errors"
+    - "Add a circuit breaker (Hystrix, Resilience4j, or Istio circuit breaker) to prevent cascade failures"
+    - "Scale up the downstream service if it is overloaded"
+    - "Review timeout configuration — consider increasing request timeout for slow dependencies"
+  confidence_hints:
+    - pattern: "5xx"
+      boost: 0.35
+    - pattern: "upstream"
+      boost: 0.3
+    - pattern: "circuit breaker"
+      boost: 0.4
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [application, http, 5xx, error-rate, circuit-breaker, downstream]
+  provider: generic
+
+- id: app-003
+  title: "Application — memory leak causing gradual OOM"
+  scope: pod
+  symptoms:
+    - "Container memory usage growing monotonically over time"
+    - "JVM heap growing between GC cycles"
+    - "APM agent tracking upward memory trend"
+    - "Eventually leads to OOMKilled container"
+  event_patterns:
+    - "OOMKilling"
+    - "memory"
+    - "heap"
+    - "GC"
+  log_patterns:
+    - "heap growing"
+    - "memory usage.*[89][0-9]%"
+    - "GC overhead limit exceeded"
+    - "OutOfMemoryError"
+    - "retained.*heap"
+    - "memory leak"
+    - "not enough space"
+  metric_patterns:
+    - "container_memory_working_set_bytes increasing over 1h"
+    - "jvm_memory_used_bytes{area='heap'} / jvm_memory_max_bytes > 0.85"
+  root_cause: "The application has a memory leak — objects are being allocated but not garbage collected, causing heap or resident memory to grow until the container hits its limit and is OOMKilled. Common causes: unbounded caches, static collections, listener/callback leaks, or unclosed streams."
+  remediation_steps:
+    - "Take a heap dump before the pod is killed: kubectl exec <pod> -- jcmd 1 GC.heap_dump /tmp/heap.hprof"
+    - "Analyse with Eclipse MAT or VisualVM to find the largest retained object graphs"
+    - "Check for static caches without eviction policy (Guava, Caffeine — ensure max size is set)"
+    - "Verify all streams, connections, and resources are closed in finally blocks or try-with-resources"
+    - "Check for event listener registration without corresponding deregistration"
+    - "For Python: use tracemalloc to identify allocation hotspots"
+    - "Increase memory limit as a temporary workaround (not a fix): kubectl set resources deployment/<name> --limits=memory=1Gi"
+    - "Add memory limit alerts at 80% to give time to diagnose before OOMKill"
+  confidence_hints:
+    - pattern: "heap growing"
+      boost: 0.45
+    - pattern: "GC overhead"
+      boost: 0.4
+    - pattern: "OutOfMemoryError"
+      boost: 0.35
+    - pattern: "memory leak"
+      boost: 0.5
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags: [application, memory, leak, heap, oom, jvm, python, performance]
+  provider: generic

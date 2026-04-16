@@ -195,11 +195,12 @@ st.markdown("---")
 # Tabs
 # ---------------------------------------------------------------------------
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
     [
         "⚡ Live Incidents",
         "🧠 RCA Analysis",
         "🔧 Remediation",
+        "📊 APM Services",
         "📚 Incident History",
         "🔍 Cluster Scan",
         "📖 Knowledge Base",
@@ -299,8 +300,8 @@ with tab1:
                     if st.button("📤 Submit Feedback", key=f"submit_fb_{inc['id']}"):
                         fb_payload = {
                             "incident_id": inc["id"],
-                            "correct_root_cause": fix_worked.startswith("Yes"),
-                            "fix_worked": rca_correct.startswith("Yes"),
+                            "correct_root_cause": rca_correct.startswith("Yes"),
+                            "fix_worked": fix_worked.startswith("Yes"),
                             "operator_notes": notes,
                             "better_remediation": better_fix if better_fix else None,
                         }
@@ -474,10 +475,80 @@ with tab3:
                     st.code(result.get("output", ""), language="text")
 
 # ---------------------------------------------------------------------------
-# Tab 4: Incident History
+# Tab 4: APM Services
 # ---------------------------------------------------------------------------
 
 with tab4:
+    st.markdown("### 📊 Application Performance Monitoring")
+
+    apm_ns = st.text_input("Namespace filter", "", key="apm_ns_filter")
+    apm_params = f"?namespace={apm_ns}" if apm_ns else ""
+    apm_data = api_get(f"/api/v1/apm/services{apm_params}")
+
+    if apm_data:
+        st.markdown(f"**{len(apm_data)} service(s) reporting**")
+        for svc in apm_data:
+            health = svc.get("health_score", 0)
+            health_icon = "🟢" if health > 80 else ("🟡" if health > 50 else "🔴")
+            with st.expander(
+                f"{health_icon} {svc.get('service_name', '?')} "
+                f"({svc.get('namespace', '?')}) — health {health}/100"
+            ):
+                sc1, sc2, sc3, sc4 = st.columns(4)
+                sc1.metric("Health Score", f"{health}/100")
+                sc2.metric("Error Rate", f"{svc.get('error_rate', 0):.1%}")
+                sc3.metric("Error Count", svc.get("error_count", 0))
+                sc4.metric("Agent", svc.get("agent_version", "?"))
+
+                top = svc.get("top_patterns", [])
+                if top:
+                    st.markdown("**Top patterns:** " + ", ".join(f"`{p}`" for p in top))
+                st.caption(f"Last report: {svc.get('last_report', '?')[:19]}")
+
+                if st.button("🔍 Detail", key=f"apm_detail_{svc.get('service_key', '')}"): 
+                    detail = api_get(
+                        f"/api/v1/apm/services/{svc['service_name']}?namespace={svc['namespace']}"
+                    )
+                    if detail:
+                        st.json(detail)
+    else:
+        st.info(
+            "No APM data yet. Deploy the sidecar agent to start monitoring application health. "
+            "See docs/sidecar-agent.md for setup."
+        )
+
+    st.markdown("---")
+    st.markdown("#### 🚨 Error Patterns Across Services")
+    err_sev = st.selectbox("Severity", ["All", "critical", "high", "medium", "low"], key="apm_err_sev")
+    err_params = f"?limit=20"
+    if err_sev != "All":
+        err_params += f"&severity={err_sev}"
+    if apm_ns:
+        err_params += f"&namespace={apm_ns}"
+    apm_errors = api_get(f"/api/v1/apm/errors{err_params}")
+    if apm_errors:
+        for err in apm_errors:
+            sev = err.get("severity", "medium")
+            with st.expander(
+                f"{severity_badge(sev)} {err.get('pattern_name', '?')} — "
+                f"{err.get('total_count', 0)} total"
+            ):
+                st.markdown(f"**Type:** `{err.get('incident_type', '?')}`")
+                st.markdown(
+                    f"**Affected services:** {', '.join(err.get('affected_services', []))}"
+                )
+                if err.get("sample"):
+                    st.code(err["sample"], language="text")
+                if err.get("remediation_hint"):
+                    st.success(f"💡 {err['remediation_hint']}")
+    else:
+        st.info("No error patterns detected yet.")
+
+# ---------------------------------------------------------------------------
+# Tab 5: Incident History
+# ---------------------------------------------------------------------------
+
+with tab5:
     st.markdown("### 📚 Incident History")
 
     # Learning stats row
@@ -551,10 +622,10 @@ with tab4:
         st.info("No incident history yet. Run a cluster scan to generate incidents.")
 
 # ---------------------------------------------------------------------------
-# Tab 5: Cluster Scan
+# Tab 6: Cluster Scan
 # ---------------------------------------------------------------------------
 
-with tab5:
+with tab6:
     st.markdown("### 🔍 Cluster Scan")
 
     col1, col2 = st.columns([2, 1])
@@ -590,10 +661,10 @@ with tab5:
         st.markdown(f"**Summary:** {summary.get('summary', '')}")
 
 # ---------------------------------------------------------------------------
-# Tab 6: Knowledge Base
+# Tab 7: Knowledge Base
 # ---------------------------------------------------------------------------
 
-with tab6:
+with tab7:
     st.markdown("### 📖 Failure Pattern Knowledge Base")
 
     # Stats row
@@ -666,10 +737,10 @@ with tab6:
         st.info("No patterns found. Try a different search query or tag filter.")
 
 # ---------------------------------------------------------------------------
-# Tab 7: Learning & Feedback
+# Tab 8: Learning & Feedback
 # ---------------------------------------------------------------------------
 
-with tab7:
+with tab8:
     st.markdown("### 🧪 Learning & Feedback Dashboard")
     st.markdown(
         "This tab shows how the system learns from operator feedback. "
