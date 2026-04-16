@@ -1,4 +1,5 @@
 """Similarity-based retrieval of past incidents for RAG context."""
+
 from __future__ import annotations
 
 import logging
@@ -76,19 +77,21 @@ class SimilarityRetriever:
         )
         results = []
         for r in retrieved:
-            results.append({
-                "id": r.incident_id,
-                "type": r.incident_type,
-                "namespace": r.namespace,
-                "root_cause": r.root_cause,
-                "suggested_fix": r.suggested_fix,
-                "similarity": round(r.similarity, 4),
-                "resolved": r.resolution_outcome == "resolved",
-                "feedback_boost": r.feedback_boost,
-                "resolution_outcome": r.resolution_outcome,
-                "created_at": r.created_at,
-                "title": r.title,
-            })
+            results.append(
+                {
+                    "id": r.incident_id,
+                    "type": r.incident_type,
+                    "namespace": r.namespace,
+                    "root_cause": r.root_cause,
+                    "suggested_fix": r.suggested_fix,
+                    "similarity": round(r.similarity, 4),
+                    "resolved": r.resolution_outcome == "resolved",
+                    "feedback_boost": r.feedback_boost,
+                    "resolution_outcome": r.resolution_outcome,
+                    "created_at": r.created_at,
+                    "title": r.title,
+                }
+            )
         return results
 
     def retrieve(
@@ -193,6 +196,7 @@ class SimilarityRetriever:
 
         logger.info(
             "SimilarityRetriever: found %d similar incidents (top_k=%d)",
-            len(results), self._top_k,
+            len(results),
+            self._top_k,
         )
         return results

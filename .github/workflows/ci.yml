@@ -109,7 +109,7 @@ jobs:
           done
 
       - name: Verify health endpoint
-        run: curl -sf http://127.0.0.1:8765/health | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='healthy', d"
+        run: curl -sf http://127.0.0.1:8765/health | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status')=='ok', d"
 
       - name: Verify cluster scan returns real data (not simulated)
         run: |

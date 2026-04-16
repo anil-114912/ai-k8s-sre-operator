@@ -1,4 +1,5 @@
 """FastAPI application — REST API for the AI K8s SRE Operator."""
+
 from __future__ import annotations
 
 import logging
@@ -10,6 +11,7 @@ from typing import Any, Dict, List, Optional
 # Load .env file BEFORE any other imports read os.getenv
 try:
     from dotenv import load_dotenv
+
     _env_path = Path(__file__).resolve().parent.parent / ".env"
     if _env_path.is_file():
         load_dotenv(_env_path, override=True)
@@ -20,33 +22,33 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from ai.incident_ranker import IncidentRanker
 from ai.rca_engine import RCAEngine
 from ai.remediation_engine import RemediationEngine
-from ai.incident_ranker import IncidentRanker
 from correlation.signal_correlator import SignalCorrelator
+from detectors.cni_detector import CNIDetector
 from detectors.crashloop_detector import CrashLoopDetector
-from detectors.oomkill_detector import OOMKillDetector
+from detectors.dns_detector import DNSDetector
+from detectors.hpa_detector import HPADetector
 from detectors.imagepull_detector import ImagePullDetector
+from detectors.ingress_detector import IngressDetector
+from detectors.network_policy_detector import NetworkPolicyDetector
+from detectors.node_pressure_detector import NodePressureDetector
+from detectors.oomkill_detector import OOMKillDetector
 from detectors.pending_pods_detector import PendingPodsDetector
 from detectors.probe_failure_detector import ProbeFailureDetector
-from detectors.service_detector import ServiceDetector
-from detectors.ingress_detector import IngressDetector
 from detectors.pvc_detector import PVCDetector
-from detectors.hpa_detector import HPADetector
-from detectors.dns_detector import DNSDetector
-from detectors.rbac_detector import RBACDetector
-from detectors.network_policy_detector import NetworkPolicyDetector
-from detectors.cni_detector import CNIDetector
-from detectors.service_mesh_detector import ServiceMeshDetector
-from detectors.node_pressure_detector import NodePressureDetector
 from detectors.quota_detector import QuotaDetector
+from detectors.rbac_detector import RBACDetector
 from detectors.rollout_detector import RolloutDetector
+from detectors.service_detector import ServiceDetector
+from detectors.service_mesh_detector import ServiceMeshDetector
 from detectors.storage_detector import StorageDetector
 from knowledge.failure_kb import FailureKnowledgeBase
+from knowledge.feedback_loop import LearningLoop
 from knowledge.feedback_store import FeedbackStore
 from knowledge.incident_store import IncidentStore
 from knowledge.learning import ContextBuilder
-from knowledge.feedback_loop import LearningLoop
 from models.cluster_resource import ClusterHealthSummary
 from models.incident import Incident, IncidentStatus, IncidentType, Severity
 from models.remediation import RemediationPlan, RemediationStatus
@@ -117,6 +119,7 @@ DETECTORS = [
 # Request / response helpers
 # ---------------------------------------------------------------------------
 
+
 class FeedbackRequest(BaseModel):
     """Operator feedback submission payload."""
 
@@ -139,10 +142,12 @@ class ScanResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @app.get("/health")
 async def health() -> Dict[str, Any]:
     """Health check endpoint — includes current operating mode."""
     from providers.kubernetes import _is_demo_mode
+
     return {
         "status": "ok",
         "service": "ai-k8s-sre-operator",
@@ -160,7 +165,8 @@ async def debug_provider() -> Dict[str, Any]:
     initialisation errors so connectivity issues can be debugged.
     """
     import traceback as tb
-    from providers.kubernetes import _is_demo_mode, RealK8sClient
+
+    from providers.kubernetes import RealK8sClient, _is_demo_mode
 
     demo = _is_demo_mode()
     env_demo = os.getenv("DEMO_MODE", "<not set>")
@@ -190,11 +196,15 @@ async def debug_provider() -> Dict[str, Any]:
             result["pod_count"] = len(pods)
             result["namespaces"] = sorted({p.get("namespace", "?") for p in pods})
         except Exception as probe_exc:
-            result["real_client_error"] = f"get_cluster_state failed: {type(probe_exc).__name__}: {probe_exc}"
+            result["real_client_error"] = (
+                f"get_cluster_state failed: {type(probe_exc).__name__}: {probe_exc}"
+            )
             result["traceback"] = tb.format_exc()
     except Exception as init_exc:
         result["client_type"] = "_SimulatedK8s (fallback)"
-        result["real_client_error"] = f"RealK8sClient() init failed: {type(init_exc).__name__}: {init_exc}"
+        result["real_client_error"] = (
+            f"RealK8sClient() init failed: {type(init_exc).__name__}: {init_exc}"
+        )
         result["traceback"] = tb.format_exc()
 
     return result
@@ -203,7 +213,8 @@ async def debug_provider() -> Dict[str, Any]:
 @app.get("/api/v1/debug/llm")
 async def debug_llm() -> Dict[str, Any]:
     """Show which LLM provider is active and whether an API key is configured."""
-    from ai.llm import get_llm_client, reset_llm_client
+    from ai.llm import get_llm_client
+
     client = get_llm_client()
     return {
         "provider": client.provider,
@@ -219,6 +230,7 @@ async def debug_llm() -> Dict[str, Any]:
 async def reload_llm() -> Dict[str, Any]:
     """Reload the LLM client — picks up a newly added API key without restarting the server."""
     from ai.llm import reset_llm_client
+
     client = reset_llm_client()
     return {
         "reloaded": True,
@@ -248,12 +260,14 @@ async def debug_pods(ns: Optional[str] = Query(None)) -> Dict[str, Any]:
             }
             for cs in p.get("container_statuses", [])
         ]
-        summary.append({
-            "name": p.get("name"),
-            "namespace": p.get("namespace"),
-            "phase": p.get("phase"),
-            "container_statuses": cs_summary,
-        })
+        summary.append(
+            {
+                "name": p.get("name"),
+                "namespace": p.get("namespace"),
+                "phase": p.get("phase"),
+                "container_statuses": cs_summary,
+            }
+        )
     return {"pod_count": len(summary), "pods": summary}
 
 
@@ -377,9 +391,7 @@ async def analyze_incident(incident_id: str) -> Dict[str, Any]:
             logger.error("Detector %s failed: %s", detector.name, exc)
 
     # Correlate signals
-    correlation = _correlator.correlate(
-        all_detections, cluster_state, incident.raw_signals
-    )
+    correlation = _correlator.correlate(all_detections, cluster_state, incident.raw_signals)
 
     # Build KB + memory context for enhanced RCA
     kb_context = _context_builder.build_kb_context(incident)
@@ -388,6 +400,7 @@ async def analyze_incident(incident_id: str) -> Dict[str, Any]:
     similar_structured = _context_builder.retrieve_similar_structured(incident)
     if similar_structured:
         from knowledge.learning import ContextBuilder as _CB
+
         memory_context = _CB._format_memory_context(similar_structured)
 
     # Get cluster-specific patterns
@@ -427,9 +440,7 @@ async def get_remediation(incident_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
 
     # Check if plan already exists
-    existing_plan = next(
-        (p for p in _plans.values() if p.incident_id == incident_id), None
-    )
+    existing_plan = next((p for p in _plans.values() if p.incident_id == incident_id), None)
     if existing_plan:
         return existing_plan.model_dump()
 
@@ -459,7 +470,9 @@ async def execute_remediation(
 
     plan = next((p for p in _plans.values() if p.incident_id == incident_id), None)
     if not plan:
-        raise HTTPException(status_code=404, detail="No remediation plan found. Call GET /remediation first.")
+        raise HTTPException(
+            status_code=404, detail="No remediation plan found. Call GET /remediation first."
+        )
 
     if plan.requires_approval and plan.status != RemediationStatus.approved:
         raise HTTPException(
@@ -516,7 +529,11 @@ async def approve_remediation(incident_id: str) -> Dict[str, Any]:
 
     plan.status = RemediationStatus.approved
     logger.info("Remediation plan approved: %s", plan.id)
-    return {"plan_id": plan.id, "status": "approved", "message": "Plan approved. Now call /execute."}
+    return {
+        "plan_id": plan.id,
+        "status": "approved",
+        "message": "Plan approved. Now call /execute.",
+    }
 
 
 @app.get("/api/v1/incidents/{incident_id}/similar")
@@ -564,6 +581,7 @@ async def submit_feedback(req: FeedbackRequest) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Knowledge base endpoints
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/v1/knowledge/failures")
 async def list_failure_patterns(tag: Optional[str] = Query(None)) -> List[Dict[str, Any]]:
@@ -797,6 +815,7 @@ async def scan_cluster(
     all_detections = deduped
 
     from collectors.logs_collector import LogsCollector
+
     _logs_collector = LogsCollector()
 
     created_ids = []
@@ -826,14 +845,19 @@ async def scan_cluster(
 
         # Enrich incident with actual pod logs and log analysis
         if incident.pod_name:
-            container_name = incident.raw_signals.get("container_name", "") if incident.raw_signals else ""
+            container_name = (
+                incident.raw_signals.get("container_name", "") if incident.raw_signals else ""
+            )
             log_lines = cluster_state.get("recent_logs", {}).get(
                 f"{incident.namespace}/{incident.pod_name}/{container_name}", []
             )
             if not log_lines:
                 log_lines = _logs_collector.get_pod_logs(
-                    incident.namespace, incident.pod_name, container_name,
-                    tail_lines=80, previous=True,
+                    incident.namespace,
+                    incident.pod_name,
+                    container_name,
+                    tail_lines=80,
+                    previous=True,
                 )
             if log_lines:
                 analysis = _logs_collector.analyze_logs(log_lines)
@@ -844,23 +868,31 @@ async def scan_cluster(
                 # Add key log lines as evidence
                 if analysis.get("key_lines"):
                     from models.incident import Evidence
+
                     incident.evidence = incident.evidence or []
-                    incident.evidence.append(Evidence(
-                        source="pod_logs",
-                        content="Key log lines:\n" + "\n".join(analysis["key_lines"][:10]),
-                        relevance=0.95,
-                    ))
+                    incident.evidence.append(
+                        Evidence(
+                            source="pod_logs",
+                            content="Key log lines:\n" + "\n".join(analysis["key_lines"][:10]),
+                            relevance=0.95,
+                        )
+                    )
                 if analysis.get("suggested_cause") and analysis.get("error_category") != "unknown":
                     from models.incident import Evidence
+
                     incident.evidence = incident.evidence or []
-                    incident.evidence.append(Evidence(
-                        source="log_analysis",
-                        content=f"Log analysis: {analysis['suggested_cause']} (category={analysis['error_category']})",
-                        relevance=0.9,
-                    ))
+                    incident.evidence.append(
+                        Evidence(
+                            source="log_analysis",
+                            content=f"Log analysis: {analysis['suggested_cause']} (category={analysis['error_category']})",
+                            relevance=0.9,
+                        )
+                    )
                 # Boost confidence based on log clarity
                 if analysis.get("confidence_boost", 0) > 0:
-                    incident.confidence = min(1.0, (incident.confidence or 0.5) + analysis["confidence_boost"])
+                    incident.confidence = min(
+                        1.0, (incident.confidence or 0.5) + analysis["confidence_boost"]
+                    )
 
         _incidents[incident.id] = incident
         _store.save_incident(incident)
@@ -894,7 +926,8 @@ async def cluster_summary() -> Dict[str, Any]:
     pending = sum(1 for p in pods if p.get("phase") == "Pending")
     failed = sum(1 for p in pods if p.get("phase") == "Failed")
     crashloop = sum(
-        1 for p in pods
+        1
+        for p in pods
         for cs in p.get("container_statuses", [])
         if cs.get("state", {}).get("waiting", {}).get("reason") == "CrashLoopBackOff"
     )
@@ -909,7 +942,8 @@ async def cluster_summary() -> Dict[str, Any]:
     bound_pvc = sum(1 for p in pvcs if p.get("phase") == "Bound")
 
     active_incidents = sum(
-        1 for i in _incidents.values()
+        1
+        for i in _incidents.values()
         if i.status not in (IncidentStatus.resolved, IncidentStatus.closed)
     )
 

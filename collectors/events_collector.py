@@ -1,4 +1,5 @@
 """Kubernetes events aggregator — filters and enriches K8s event streams."""
+
 from __future__ import annotations
 
 import logging
@@ -7,9 +8,18 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 WARNING_REASONS = {
-    "BackOff", "Failed", "FailedScheduling", "FailedMount", "Unhealthy",
-    "OOMKilling", "ImagePullBackOff", "ErrImagePull", "NodeNotReady",
-    "Evicted", "FailedCreate", "FailedBinding",
+    "BackOff",
+    "Failed",
+    "FailedScheduling",
+    "FailedMount",
+    "Unhealthy",
+    "OOMKilling",
+    "ImagePullBackOff",
+    "ErrImagePull",
+    "NodeNotReady",
+    "Evicted",
+    "FailedCreate",
+    "FailedBinding",
 }
 
 

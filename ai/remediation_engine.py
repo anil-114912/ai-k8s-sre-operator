@@ -1,4 +1,5 @@
 """Remediation plan generator — produces safe, ordered remediation plans from RCA output."""
+
 from __future__ import annotations
 
 import json
@@ -233,7 +234,7 @@ DEFAULT_REMEDIATIONS: Dict[str, List[Dict[str, Any]]] = {
         {
             "order": 1,
             "action": "patch_selector",
-            "command": "kubectl patch svc {workload} -n {ns} -p '{{\"spec\":{{\"selector\":{{<correct_labels>}}}}}}'",
+            "command": 'kubectl patch svc {workload} -n {ns} -p \'{{"spec":{{"selector":{{<correct_labels>}}}}}}\'',
             "description": "Patch Service selector to match current pod labels (requires approval)",
             "safety_level": "approval_required",
             "reversible": True,
@@ -255,7 +256,7 @@ DEFAULT_REMEDIATIONS: Dict[str, List[Dict[str, Any]]] = {
         {
             "order": 1,
             "action": "patch_probes",
-            "command": "kubectl patch deployment {workload} -n {ns} -p '{{\"spec\":{{\"template\":{{\"spec\":{{\"containers\":[{{\"name\":\"{workload}\",\"readinessProbe\":{{\"initialDelaySeconds\":30}}}}]}}}}}}}'",
+            "command": 'kubectl patch deployment {workload} -n {ns} -p \'{{"spec":{{"template":{{"spec":{{"containers":[{{"name":"{workload}","readinessProbe":{{"initialDelaySeconds":30}}}}]}}}}}}}\'',
             "description": "Increase probe initialDelaySeconds to give app more startup time",
             "safety_level": "approval_required",
             "reversible": True,
@@ -266,7 +267,7 @@ DEFAULT_REMEDIATIONS: Dict[str, List[Dict[str, Any]]] = {
         {
             "order": 1,
             "action": "patch_selector",
-            "command": "kubectl patch hpa {workload} -n {ns} -p '{{\"spec\":{{\"maxReplicas\":10}}}}'",
+            "command": 'kubectl patch hpa {workload} -n {ns} -p \'{{"spec":{{"maxReplicas":10}}}}\'',
             "description": "Update HPA maxReplicas to allow auto-scaling",
             "safety_level": "approval_required",
             "reversible": True,
@@ -303,9 +304,7 @@ class RemediationEngine:
         Returns:
             A fully-populated RemediationPlan.
         """
-        logger.info(
-            "Generating remediation plan for incident: %s", incident.id
-        )
+        logger.info("Generating remediation plan for incident: %s", incident.id)
 
         # Try LLM-based plan generation
         plan_data = self._generate_via_llm(incident)
@@ -379,7 +378,9 @@ class RemediationEngine:
         # Fallback: dig into last_state / container_state dicts
         if exit_code is None:
             for state_dict in (raw.get("last_state", {}), raw.get("container_state", {})):
-                terminated = state_dict.get("terminated", {}) if isinstance(state_dict, dict) else {}
+                terminated = (
+                    state_dict.get("terminated", {}) if isinstance(state_dict, dict) else {}
+                )
                 if terminated.get("exitCode") is not None:
                     exit_code = terminated["exitCode"]
                     break
@@ -390,29 +391,59 @@ class RemediationEngine:
 
         # Check log analysis category first — most reliable direct signal from logs
         log_analysis = raw.get("log_analysis", {})
-        log_category = log_analysis.get("error_category", "unknown") if isinstance(log_analysis, dict) else "unknown"
+        log_category = (
+            log_analysis.get("error_category", "unknown")
+            if isinstance(log_analysis, dict)
+            else "unknown"
+        )
 
         # OOMKill signals: log category, exit code 137, or OOM keywords
-        if log_category == "oom" or exit_code == 137 or any(kw in combined_text for kw in ("oom", "out of memory", "memory limit", "killed")):
+        if (
+            log_category == "oom"
+            or exit_code == 137
+            or any(kw in combined_text for kw in ("oom", "out of memory", "memory limit", "killed"))
+        ):
             return "oom"
 
         # Missing config: log category or config keywords
-        if log_category == "missing_config" or any(kw in combined_text for kw in (
-            "secret", "configmap", "env", "environment variable", "configuration",
-            "missing", "not found", "no such", "credentials", "token", "password",
-            "connection refused", "database", "cannot connect",
-        )):
+        if log_category == "missing_config" or any(
+            kw in combined_text
+            for kw in (
+                "secret",
+                "configmap",
+                "env",
+                "environment variable",
+                "configuration",
+                "missing",
+                "not found",
+                "no such",
+                "credentials",
+                "token",
+                "password",
+                "connection refused",
+                "database",
+                "cannot connect",
+            )
+        ):
             return "missing_config"
 
         # Segfault or image panic signals: log category, exit code 139, or image/binary keywords
-        if log_category in ("panic", "image_error") or exit_code == 139 or any(kw in combined_text for kw in ("segfault", "segmentation", "panic", "image", "binary", "corrupt")):
+        if (
+            log_category in ("panic", "image_error")
+            or exit_code == 139
+            or any(
+                kw in combined_text
+                for kw in ("segfault", "segmentation", "panic", "image", "binary", "corrupt")
+            )
+        ):
             return "bad_image"
 
         # Exit code 1 with no other signal — check logs text in evidence
-        evidence_text = " ".join(
-            (e.content or "").lower() for e in (incident.evidence or [])
-        )
-        if any(kw in evidence_text for kw in ("secret", "config", "env", "missing", "not found", "credentials")):
+        evidence_text = " ".join((e.content or "").lower() for e in (incident.evidence or []))
+        if any(
+            kw in evidence_text
+            for kw in ("secret", "config", "env", "missing", "not found", "credentials")
+        ):
             return "missing_config"
 
         return "unknown"
@@ -441,14 +472,18 @@ class RemediationEngine:
                 f"CrashLoopBackOff remediation ({strategy_label}) "
                 f"for {incident.namespace}/{incident.workload}"
             )
-            rollback_plan = f"kubectl rollout undo deployment/{incident.workload} -n {incident.namespace}"
+            rollback_plan = (
+                f"kubectl rollout undo deployment/{incident.workload} -n {incident.namespace}"
+            )
         else:
             raw_steps = DEFAULT_REMEDIATIONS.get(
                 incident_type,
                 _CRASHLOOP_STRATEGIES["unknown"],
             )
             summary = f"Rule-based remediation for {incident_type} in {incident.namespace}/{incident.workload}"
-            rollback_plan = f"kubectl rollout undo deployment/{incident.workload} -n {incident.namespace}"
+            rollback_plan = (
+                f"kubectl rollout undo deployment/{incident.workload} -n {incident.namespace}"
+            )
 
         # Substitute template variables
         steps = []

@@ -1,28 +1,28 @@
 """CLI entrypoint — ai-sre command with rich terminal output."""
+
 from __future__ import annotations
 
 import json
 import os
-import sys
-import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 # Load .env from project root so DEMO_MODE, KUBECONFIG, etc. are available
 try:
     from dotenv import load_dotenv as _load_dotenv
+
     _load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
 except ImportError:
     pass
 
 import click
 import httpx
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from rich.text import Text
-from rich import box
 
 console = Console()
 API_BASE = os.getenv("API_BASE_URL", "http://localhost:8000")
@@ -31,6 +31,7 @@ API_BASE = os.getenv("API_BASE_URL", "http://localhost:8000")
 # ---------------------------------------------------------------------------
 # CLI group
 # ---------------------------------------------------------------------------
+
 
 @click.group()
 @click.option("--api-url", default=API_BASE, envvar="API_BASE_URL", help="API base URL")
@@ -44,6 +45,7 @@ def cli(ctx: click.Context, api_url: str) -> None:
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
+
 
 def _api_get(api_url: str, path: str) -> Optional[Any]:
     """Make an API GET request and return parsed JSON."""
@@ -69,17 +71,26 @@ def _api_post(api_url: str, path: str, data: dict = None) -> Optional[Any]:
 
 def _severity_color(sev: str) -> str:
     """Map severity to a rich color."""
-    return {"critical": "red", "high": "orange3", "medium": "yellow", "low": "green", "info": "blue"}.get(sev, "white")
+    return {
+        "critical": "red",
+        "high": "orange3",
+        "medium": "yellow",
+        "low": "green",
+        "info": "blue",
+    }.get(sev, "white")
 
 
 def _safety_color(level: str) -> str:
     """Map safety level to a rich color."""
-    return {"auto_fix": "green", "approval_required": "yellow", "suggest_only": "magenta"}.get(level, "white")
+    return {"auto_fix": "green", "approval_required": "yellow", "suggest_only": "magenta"}.get(
+        level, "white"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Cluster scan
 # ---------------------------------------------------------------------------
+
 
 @cli.group()
 def cluster() -> None:
@@ -95,8 +106,10 @@ def cluster_scan(ctx: click.Context, namespace: str) -> None:
     api_url = ctx.obj["api_url"]
     console.print(Panel("[bold cyan]Running cluster scan...[/bold cyan]", title="🔍 Cluster Scan"))
 
-    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as progress:
-        task = progress.add_task("Scanning...", total=None)
+    with Progress(
+        SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True
+    ) as progress:
+        progress.add_task("Scanning...", total=None)
         params = f"?namespace={namespace}" if namespace else ""
         result = _api_post(api_url, f"/api/v1/scan{params}")
 
@@ -126,6 +139,7 @@ def cluster_scan(ctx: click.Context, namespace: str) -> None:
 # ---------------------------------------------------------------------------
 # Incidents
 # ---------------------------------------------------------------------------
+
 
 @cli.group()
 def incidents() -> None:
@@ -202,9 +216,13 @@ def incident_analyze(ctx: click.Context, incident_id_or_file: str) -> None:
         incident_id = ingested["id"]
         console.print(f"[green]Incident ingested: {incident_id}[/green]")
 
-    console.print(Panel(f"[bold cyan]Analyzing incident: {incident_id}[/bold cyan]", title="🧠 AI RCA"))
+    console.print(
+        Panel(f"[bold cyan]Analyzing incident: {incident_id}[/bold cyan]", title="🧠 AI RCA")
+    )
 
-    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as progress:
+    with Progress(
+        SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True
+    ) as progress:
         progress.add_task("Running correlation and AI analysis...", total=None)
         result = _api_post(api_url, f"/api/v1/incidents/{incident_id}/analyze")
 
@@ -261,6 +279,7 @@ def incident_analyze(ctx: click.Context, incident_id_or_file: str) -> None:
 # Remediation
 # ---------------------------------------------------------------------------
 
+
 @cli.group()
 def remediation() -> None:
     """Remediation plan commands."""
@@ -316,10 +335,11 @@ def remediation_execute(ctx: click.Context, incident_id: str, dry_run: bool) -> 
     """Execute the remediation plan for an incident."""
     api_url = ctx.obj["api_url"]
     mode = "DRY RUN" if dry_run else "LIVE"
-    console.print(
-        Panel(f"[bold]Executing remediation ({mode})...[/bold]", title="▶️ Execute")
+    console.print(Panel(f"[bold]Executing remediation ({mode})...[/bold]", title="▶️ Execute"))
+    result = _api_post(
+        api_url,
+        f"/api/v1/incidents/{incident_id}/remediation/execute?dry_run={str(dry_run).lower()}",
     )
-    result = _api_post(api_url, f"/api/v1/incidents/{incident_id}/remediation/execute?dry_run={str(dry_run).lower()}")
     if result:
         console.print(result.get("output", ""))
         if result.get("success"):
@@ -340,6 +360,7 @@ def remediation_approve(ctx: click.Context, incident_id: str) -> None:
 # ---------------------------------------------------------------------------
 # Simulate
 # ---------------------------------------------------------------------------
+
 
 @cli.command("simulate")
 @click.option(
@@ -405,7 +426,9 @@ def simulate(ctx: click.Context, inc_type: str, demo: bool) -> None:
     incident_id = ingested["id"]
     console.print(f"[green]Incident created: {incident_id}[/green]")
 
-    with Progress(SpinnerColumn(), TextColumn("Running AI analysis pipeline..."), transient=True) as p:
+    with Progress(
+        SpinnerColumn(), TextColumn("Running AI analysis pipeline..."), transient=True
+    ) as p:
         p.add_task("", total=None)
         analyzed = _api_post(api_url, f"/api/v1/incidents/{incident_id}/analyze")
 
@@ -422,13 +445,14 @@ def simulate(ctx: click.Context, inc_type: str, demo: bool) -> None:
 
 def _run_demo_pipeline(inc_data: Dict[str, Any]) -> None:
     """Run the full analysis pipeline locally without the API server."""
-    from models.incident import Incident
     from ai.rca_engine import RCAEngine
     from ai.remediation_engine import RemediationEngine
     from correlation.signal_correlator import SignalCorrelator
-    from knowledge.incident_store import IncidentStore
+    from models.incident import Incident
 
-    with Progress(SpinnerColumn(), TextColumn("Running AI analysis pipeline (offline)..."), transient=True) as p:
+    with Progress(
+        SpinnerColumn(), TextColumn("Running AI analysis pipeline (offline)..."), transient=True
+    ) as p:
         task = p.add_task("", total=None)
 
         incident = Incident(**inc_data)
@@ -500,6 +524,7 @@ def _print_remediation_summary(plan: Dict[str, Any]) -> None:
 # Learn / feedback
 # ---------------------------------------------------------------------------
 
+
 @cli.group()
 def learn() -> None:
     """Learning and feedback commands."""
@@ -528,6 +553,7 @@ def learn_feedback(ctx: click.Context, incident_id: str, success: bool, notes: s
 # Feedback commands (extended)
 # ---------------------------------------------------------------------------
 
+
 @cli.group()
 def feedback() -> None:
     """Operator feedback commands."""
@@ -543,10 +569,17 @@ def feedback_submit_group() -> None:
 @feedback.command("submit")
 @click.argument("incident_id")
 @click.option("--correct/--incorrect", default=True, help="Whether the RCA was correct")
-@click.option("--fix-worked/--fix-failed", "fix_worked", default=True, help="Whether the fix resolved the incident")
+@click.option(
+    "--fix-worked/--fix-failed",
+    "fix_worked",
+    default=True,
+    help="Whether the fix resolved the incident",
+)
 @click.option("--notes", default="", help="Operator notes")
 @click.pass_context
-def feedback_submit(ctx: click.Context, incident_id: str, correct: bool, fix_worked: bool, notes: str) -> None:
+def feedback_submit(
+    ctx: click.Context, incident_id: str, correct: bool, fix_worked: bool, notes: str
+) -> None:
     """Submit structured feedback for an incident's RCA and fix quality."""
     api_url = ctx.obj["api_url"]
     result = _api_post(
@@ -600,6 +633,7 @@ def feedback_stats(ctx: click.Context) -> None:
 # Knowledge base commands
 # ---------------------------------------------------------------------------
 
+
 @cli.group()
 def knowledge() -> None:
     """Knowledge base commands."""
@@ -614,7 +648,9 @@ def knowledge() -> None:
 def knowledge_search(ctx: click.Context, query: str, provider: str, top_k: int) -> None:
     """Search the failure pattern knowledge base."""
     api_url = ctx.obj["api_url"]
-    results = _api_get(api_url, f"/api/v1/knowledge/search?q={query}&provider={provider}&top_k={top_k}")
+    results = _api_get(
+        api_url, f"/api/v1/knowledge/search?q={query}&provider={provider}&top_k={top_k}"
+    )
     if not results:
         console.print("[yellow]No matching patterns found.[/yellow]")
         return
@@ -643,12 +679,11 @@ def knowledge_search(ctx: click.Context, query: str, provider: str, top_k: int) 
         top = results[0]
         console.print(
             Panel(
-                f"[bold]Root cause:[/bold] {top.get('root_cause','')}\n\n"
+                f"[bold]Root cause:[/bold] {top.get('root_cause', '')}\n\n"
                 + "\n".join(
-                    f"{i+1}. {s}"
-                    for i, s in enumerate(top.get("remediation_steps", [])[:3])
+                    f"{i + 1}. {s}" for i, s in enumerate(top.get("remediation_steps", [])[:3])
                 ),
-                title=f"💡 Top Match: {top.get('title','')}",
+                title=f"💡 Top Match: {top.get('title', '')}",
                 border_style="green",
             )
         )
@@ -694,6 +729,7 @@ def knowledge_list(ctx: click.Context, tag: str) -> None:
 # ---------------------------------------------------------------------------
 # Cluster patterns command
 # ---------------------------------------------------------------------------
+
 
 @cluster.command("patterns")
 @click.option("--cluster-name", default="default", help="Cluster name identifier")

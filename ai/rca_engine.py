@@ -1,4 +1,5 @@
 """Root Cause Analysis engine — structured AI-powered incident analysis."""
+
 from __future__ import annotations
 
 import json
@@ -7,9 +8,9 @@ from typing import Any, Dict, List, Optional
 
 from ai.llm import get_llm_client
 from ai.prompts import (
+    RCA_KB_MEMORY_SYSTEM_PROMPT,
     RCA_SYSTEM_PROMPT,
     RCA_USER_TEMPLATE,
-    RCA_KB_MEMORY_SYSTEM_PROMPT,
     rca_with_kb_and_memory,
 )
 from correlation.signal_correlator import CorrelationResult
@@ -61,12 +62,8 @@ class RCAEngine:
         incident.status = IncidentStatus.analyzing
 
         # Format correlation signals
-        root_cause_signals = self._format_detections(
-            correlation.root_causes if correlation else []
-        )
-        symptom_signals = self._format_detections(
-            correlation.symptoms if correlation else []
-        )
+        root_cause_signals = self._format_detections(correlation.root_causes if correlation else [])
+        symptom_signals = self._format_detections(correlation.symptoms if correlation else [])
         contributing_signals = self._format_detections(
             correlation.contributing_factors if correlation else []
         )
@@ -78,8 +75,7 @@ class RCAEngine:
         cluster_patterns_str = "None"
         if cluster_patterns:
             cluster_patterns_str = ", ".join(
-                f"{p['incident_type']} ({p['count']}x)"
-                for p in cluster_patterns[:5]
+                f"{p['incident_type']} ({p['count']}x)" for p in cluster_patterns[:5]
             )
 
         # Extract log content from raw signals for LLM
@@ -111,7 +107,8 @@ class RCAEngine:
                 contributing_factor_signals=contributing_signals,
                 evidence_text=evidence_text,
                 kb_context=kb_context or "",
-                memory_context=memory_context or self._format_similar_incidents(similar_incidents or []),
+                memory_context=memory_context
+                or self._format_similar_incidents(similar_incidents or []),
                 cluster_patterns=cluster_patterns_str,
                 pod_logs=pod_logs_str,
                 log_analysis=log_analysis_str,
@@ -158,6 +155,7 @@ class RCAEngine:
         try:
             from knowledge.feedback_loop import LearningLoop
             from knowledge.incident_store import IncidentStore
+
             _loop = LearningLoop(IncidentStore())
             incident.confidence = _loop.adjust_confidence(
                 incident.confidence,
@@ -200,9 +198,7 @@ class RCAEngine:
         )
         return incident
 
-    def _build_timeline_text(
-        self, incident: Incident, cluster_state: Dict[str, Any]
-    ) -> str:
+    def _build_timeline_text(self, incident: Incident, cluster_state: Dict[str, Any]) -> str:
         """Build a formatted timeline from incident signals.
 
         Args:
@@ -273,10 +269,10 @@ class RCAEngine:
         lines = []
         for s in similar[:3]:
             lines.append(
-                f"- Past incident (type={s.get('type','?')}, "
-                f"namespace={s.get('namespace','?')}): "
-                f"root_cause={s.get('root_cause','unknown')}. "
-                f"Fix: {s.get('suggested_fix','unknown')}. "
+                f"- Past incident (type={s.get('type', '?')}, "
+                f"namespace={s.get('namespace', '?')}): "
+                f"root_cause={s.get('root_cause', 'unknown')}. "
+                f"Fix: {s.get('suggested_fix', 'unknown')}. "
                 f"Success: {s.get('resolved', False)}"
             )
         return "\n".join(lines)

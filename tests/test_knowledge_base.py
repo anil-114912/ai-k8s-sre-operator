@@ -1,4 +1,5 @@
 """Tests for the Hybrid Learning Architecture knowledge base components."""
+
 from __future__ import annotations
 
 import pytest
@@ -7,13 +8,13 @@ from knowledge.failure_kb import FailureKnowledgeBase, FailurePattern
 from knowledge.feedback_store import FeedbackStore
 from knowledge.incident_store import IncidentStore
 from knowledge.learning import ContextBuilder
-from knowledge.retrieval import SimilarityRetriever, RetrievedIncident
+from knowledge.retrieval import RetrievedIncident, SimilarityRetriever
 from models.incident import Incident, IncidentType, Severity
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def kb() -> FailureKnowledgeBase:
@@ -45,6 +46,7 @@ def sample_incident() -> Incident:
 # ---------------------------------------------------------------------------
 # FailureKnowledgeBase — load tests
 # ---------------------------------------------------------------------------
+
 
 class TestFailureKnowledgeBaseLoad:
     """Tests for FailureKnowledgeBase.load()."""
@@ -90,6 +92,7 @@ class TestFailureKnowledgeBaseLoad:
 # ---------------------------------------------------------------------------
 # FailureKnowledgeBase — search tests
 # ---------------------------------------------------------------------------
+
 
 class TestFailureKnowledgeBaseSearch:
     """Tests for FailureKnowledgeBase.search()."""
@@ -180,6 +183,7 @@ class TestFailureKnowledgeBaseSearch:
 # ContextBuilder — combined KB + memory context
 # ---------------------------------------------------------------------------
 
+
 class TestContextBuilder:
     """Tests for ContextBuilder combined context generation."""
 
@@ -230,6 +234,7 @@ class TestContextBuilder:
 # ---------------------------------------------------------------------------
 # SimilarityRetriever — feedback boost tests
 # ---------------------------------------------------------------------------
+
 
 class TestSimilarityRetrieverFeedback:
     """Tests for SimilarityRetriever feedback boost and scoring."""
@@ -320,6 +325,7 @@ class TestSimilarityRetrieverFeedback:
 # FeedbackStore — accuracy stats
 # ---------------------------------------------------------------------------
 
+
 class TestFeedbackStoreAccuracyStats:
     """Tests for FeedbackStore.get_accuracy_stats()."""
 
@@ -395,21 +401,25 @@ class TestFeedbackStoreAccuracyStats:
     def test_top_failure_types_populated(self, mem_store):
         """top_failure_types should list the most common incident types."""
         for _ in range(4):
-            mem_store.save_incident(Incident(
-                title="CrashLoop",
-                incident_type=IncidentType.crash_loop,
-                severity=Severity.high,
-                namespace="prod",
-                workload="app",
-            ))
+            mem_store.save_incident(
+                Incident(
+                    title="CrashLoop",
+                    incident_type=IncidentType.crash_loop,
+                    severity=Severity.high,
+                    namespace="prod",
+                    workload="app",
+                )
+            )
         for _ in range(2):
-            mem_store.save_incident(Incident(
-                title="OOM",
-                incident_type=IncidentType.oom_killed,
-                severity=Severity.high,
-                namespace="prod",
-                workload="app",
-            ))
+            mem_store.save_incident(
+                Incident(
+                    title="OOM",
+                    incident_type=IncidentType.oom_killed,
+                    severity=Severity.high,
+                    namespace="prod",
+                    workload="app",
+                )
+            )
 
         fs = FeedbackStore(mem_store)
         stats = fs.get_accuracy_stats()
@@ -422,39 +432,46 @@ class TestFeedbackStoreAccuracyStats:
 # IncidentStore — new methods
 # ---------------------------------------------------------------------------
 
+
 class TestIncidentStoreNewMethods:
     """Tests for the new IncidentStore methods."""
 
     def test_get_by_namespace(self, mem_store):
         """get_by_namespace() should return only incidents in that namespace."""
         for ns in ("prod", "staging", "prod"):
-            mem_store.save_incident(Incident(
-                title=f"Inc in {ns}",
-                incident_type=IncidentType.crash_loop,
-                severity=Severity.medium,
-                namespace=ns,
-                workload="app",
-            ))
+            mem_store.save_incident(
+                Incident(
+                    title=f"Inc in {ns}",
+                    incident_type=IncidentType.crash_loop,
+                    severity=Severity.medium,
+                    namespace=ns,
+                    workload="app",
+                )
+            )
         results = mem_store.get_by_namespace("prod")
         assert len(results) == 2
         assert all(r["namespace"] == "prod" for r in results)
 
     def test_get_by_type(self, mem_store):
         """get_by_type() should return only incidents of that type."""
-        mem_store.save_incident(Incident(
-            title="CrashLoop",
-            incident_type=IncidentType.crash_loop,
-            severity=Severity.high,
-            namespace="prod",
-            workload="app",
-        ))
-        mem_store.save_incident(Incident(
-            title="OOM",
-            incident_type=IncidentType.oom_killed,
-            severity=Severity.high,
-            namespace="prod",
-            workload="app",
-        ))
+        mem_store.save_incident(
+            Incident(
+                title="CrashLoop",
+                incident_type=IncidentType.crash_loop,
+                severity=Severity.high,
+                namespace="prod",
+                workload="app",
+            )
+        )
+        mem_store.save_incident(
+            Incident(
+                title="OOM",
+                incident_type=IncidentType.oom_killed,
+                severity=Severity.high,
+                namespace="prod",
+                workload="app",
+            )
+        )
         results = mem_store.get_by_type("CrashLoopBackOff")
         assert len(results) == 1
         assert results[0]["type"] == "CrashLoopBackOff"
@@ -462,13 +479,15 @@ class TestIncidentStoreNewMethods:
     def test_get_recent_limit(self, mem_store):
         """get_recent() should respect the limit parameter."""
         for i in range(5):
-            mem_store.save_incident(Incident(
-                title=f"Inc {i}",
-                incident_type=IncidentType.crash_loop,
-                severity=Severity.low,
-                namespace="default",
-                workload="app",
-            ))
+            mem_store.save_incident(
+                Incident(
+                    title=f"Inc {i}",
+                    incident_type=IncidentType.crash_loop,
+                    severity=Severity.low,
+                    namespace="default",
+                    workload="app",
+                )
+            )
         results = mem_store.get_recent(limit=3)
         assert len(results) == 3
 

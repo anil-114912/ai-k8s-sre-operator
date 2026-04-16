@@ -1,4 +1,5 @@
 """All prompt templates for AI-powered analysis."""
+
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
@@ -257,7 +258,9 @@ def rca_with_kb_and_memory(
 # Incident ranking prompt
 # ---------------------------------------------------------------------------
 
-RANKING_SYSTEM_PROMPT = """You are a Kubernetes SRE triage specialist. Rank incidents by business impact and urgency."""
+RANKING_SYSTEM_PROMPT = (
+    """You are a Kubernetes SRE triage specialist. Rank incidents by business impact and urgency."""
+)
 
 RANKING_USER_TEMPLATE = """
 Rank these incidents by severity and urgency. Consider: customer impact, blast radius, ease of fix.

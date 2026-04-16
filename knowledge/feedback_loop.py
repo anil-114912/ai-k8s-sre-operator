@@ -1,16 +1,16 @@
 """Feedback learning loop — retrains embeddings, promotes successful patterns, captures unknown errors."""
+
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import yaml
 
-from knowledge.embeddings import IncidentEmbedder, TFIDFEmbedder
+from knowledge.embeddings import IncidentEmbedder
 from knowledge.incident_store import IncidentStore
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,9 @@ class LearningLoop:
             os.makedirs(os.path.dirname(_LEARNED_FILE), exist_ok=True)
             with open(_LEARNED_FILE, "w") as f:
                 yaml.dump(self._learned_patterns, f, default_flow_style=False, sort_keys=False)
-            logger.info("Saved %d learned patterns to %s", len(self._learned_patterns), _LEARNED_FILE)
+            logger.info(
+                "Saved %d learned patterns to %s", len(self._learned_patterns), _LEARNED_FILE
+            )
         except Exception as exc:
             logger.error("Failed to save learned patterns: %s", exc)
 
@@ -87,10 +89,20 @@ class LearningLoop:
         error_lines = []
         for line in log_lines:
             line_lower = line.lower()
-            if any(kw in line_lower for kw in (
-                "error", "fatal", "panic", "exception", "traceback",
-                "failed", "critical", "segfault", "killed",
-            )):
+            if any(
+                kw in line_lower
+                for kw in (
+                    "error",
+                    "fatal",
+                    "panic",
+                    "exception",
+                    "traceback",
+                    "failed",
+                    "critical",
+                    "segfault",
+                    "killed",
+                )
+            ):
                 error_lines.append(line.strip())
 
         if not error_lines:
@@ -150,7 +162,9 @@ class LearningLoop:
         self._save_learned_patterns()
         logger.info(
             "Captured new error pattern: id=%s signatures=%d namespace=%s",
-            pattern_id, len(novel_sigs), namespace,
+            pattern_id,
+            len(novel_sigs),
+            namespace,
         )
         return candidate
 
@@ -221,8 +235,9 @@ class LearningLoop:
         inc_type = inc.get("type", "")
         namespace = inc.get("namespace", "")
         for pattern in self._learned_patterns:
-            if (pattern.get("learned_from_namespace") == namespace
-                    and inc_type.lower() in [t.lower() for t in pattern.get("tags", [])]):
+            if pattern.get("learned_from_namespace") == namespace and inc_type.lower() in [
+                t.lower() for t in pattern.get("tags", [])
+            ]:
                 pattern["feedback_count"] = pattern.get("feedback_count", 0) + 1
                 if success:
                     pattern["success_count"] = pattern.get("success_count", 0) + 1
@@ -239,7 +254,9 @@ class LearningLoop:
         self._save_learned_patterns()
         logger.info(
             "Feedback processed: incident=%s success=%s correct_rca=%s",
-            incident_id, success, correct_root_cause,
+            incident_id,
+            success,
+            correct_root_cause,
         )
 
     def _maybe_promote_pattern(self, incident: Dict[str, Any]) -> None:
@@ -256,16 +273,16 @@ class LearningLoop:
 
         # Check if we already have a learned pattern for this
         for p in self._learned_patterns:
-            if (p.get("learned_from_namespace") == namespace
-                    and p.get("title", "").endswith(f"{inc_type} in {namespace}/{incident.get('workload', '')}")):
+            if p.get("learned_from_namespace") == namespace and p.get("title", "").endswith(
+                f"{inc_type} in {namespace}/{incident.get('workload', '')}"
+            ):
                 # Already tracked — update success count
                 return
 
         # Check recurrence: how many resolved incidents of this type in this namespace?
         ns_incidents = self._store.get_by_namespace(namespace)
         same_type_resolved = [
-            i for i in ns_incidents
-            if i.get("type") == inc_type and i.get("resolved")
+            i for i in ns_incidents if i.get("type") == inc_type and i.get("resolved")
         ]
 
         if len(same_type_resolved) < 2:
@@ -303,7 +320,10 @@ class LearningLoop:
         self._learned_patterns.append(promoted)
         logger.info(
             "Promoted pattern: id=%s type=%s namespace=%s occurrences=%d",
-            pattern_id, inc_type, namespace, len(same_type_resolved),
+            pattern_id,
+            inc_type,
+            namespace,
+            len(same_type_resolved),
         )
 
     # ------------------------------------------------------------------

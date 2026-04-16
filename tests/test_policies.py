@@ -1,14 +1,13 @@
 """Tests for safety policies and guardrails."""
+
 from __future__ import annotations
 
-import os
 import time
-import pytest
 
 from models.remediation import RemediationStep, SafetyLevel
-from policies.namespace_policies import NamespacePolicy
 from policies.action_allowlist import ActionAllowlist
-from policies.safety_levels import SAFETY_RULES, get_action_safety_level, is_auto_fixable
+from policies.namespace_policies import NamespacePolicy
+from policies.safety_levels import get_action_safety_level, is_auto_fixable
 from remediations.policy_guardrails import PolicyGuardrails
 
 
@@ -135,7 +134,12 @@ class TestPolicyGuardrails:
         step = make_step("rbac_changes", SafetyLevel.suggest_only)
         allowed, reason = guardrails.validate(step, "production", "app")
         assert allowed is False
-        assert "suggest-only" in reason.lower() or "Level 3" in reason or "suggest_only" in reason.lower() or "cannot be auto-executed" in reason.lower()
+        assert (
+            "suggest-only" in reason.lower()
+            or "Level 3" in reason
+            or "suggest_only" in reason.lower()
+            or "cannot be auto-executed" in reason.lower()
+        )
 
     def test_cooldown_blocks_repeated_execution(self):
         """Guardrails should enforce cooldown between executions on the same workload."""
@@ -145,6 +149,7 @@ class TestPolicyGuardrails:
         )
         # Record a recent execution
         import remediations.policy_guardrails as pg
+
         pg._cooldown_tracker["production/payment-api"] = time.time()
 
         step = make_step("rollout_restart", SafetyLevel.auto_fix)

@@ -1,9 +1,10 @@
 """Pod/container log fetcher."""
+
 from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +45,11 @@ class LogsCollector:
 
         try:
             from providers.kubernetes import get_k8s_client
-            client = get_k8s_client()
+
+            get_k8s_client()
             # If real client, use core API
             import kubernetes
+
             core = kubernetes.client.CoreV1Api()
             kwargs: Dict = {
                 "name": pod_name,
@@ -104,41 +107,103 @@ class LogsCollector:
         """
         # Keyword sets per category — checked in priority order
         _CATEGORIES = [
-            ("oom", [
-                "out of memory", "oom", "killed", "cannot allocate memory",
-                "memory limit", "oomkilled",
-            ]),
-            ("panic", [
-                "panic:", "sigsegv", "segmentation fault", "fatal error",
-                "runtime error", "goroutine", "exception in thread",
-                "traceback (most recent",
-            ]),
-            ("db_connection", [
-                "connection refused", "dial tcp", "timeout", "econnrefused",
-                "connect: connection refused", "database", "postgres", "mysql",
-                "redis", "mongo", "unable to connect",
-            ]),
-            ("missing_config", [
-                "secret", "configmap", "env", "environment variable",
-                "not found", "no such file", "missing", "credentials",
-                "token", "password", "connection string", "database url",
-                "enoent", "keyerror", "undefined",
-            ]),
-            ("permission", [
-                "permission denied", "eacces", "forbidden", "unauthorized",
-                "access denied", "not permitted",
-            ]),
-            ("port_conflict", [
-                "address already in use", "eaddrinuse", "bind: address",
-            ]),
-            ("image_error", [
-                "exec format error", "no such file or directory",
-                "not found", "executable file not found",
-            ]),
-            ("startup_failure", [
-                "failed to start", "startup failed", "initialization failed",
-                "failed to initialize",
-            ]),
+            (
+                "oom",
+                [
+                    "out of memory",
+                    "oom",
+                    "killed",
+                    "cannot allocate memory",
+                    "memory limit",
+                    "oomkilled",
+                ],
+            ),
+            (
+                "panic",
+                [
+                    "panic:",
+                    "sigsegv",
+                    "segmentation fault",
+                    "fatal error",
+                    "runtime error",
+                    "goroutine",
+                    "exception in thread",
+                    "traceback (most recent",
+                ],
+            ),
+            (
+                "db_connection",
+                [
+                    "connection refused",
+                    "dial tcp",
+                    "timeout",
+                    "econnrefused",
+                    "connect: connection refused",
+                    "database",
+                    "postgres",
+                    "mysql",
+                    "redis",
+                    "mongo",
+                    "unable to connect",
+                ],
+            ),
+            (
+                "missing_config",
+                [
+                    "secret",
+                    "configmap",
+                    "env",
+                    "environment variable",
+                    "not found",
+                    "no such file",
+                    "missing",
+                    "credentials",
+                    "token",
+                    "password",
+                    "connection string",
+                    "database url",
+                    "enoent",
+                    "keyerror",
+                    "undefined",
+                ],
+            ),
+            (
+                "permission",
+                [
+                    "permission denied",
+                    "eacces",
+                    "forbidden",
+                    "unauthorized",
+                    "access denied",
+                    "not permitted",
+                ],
+            ),
+            (
+                "port_conflict",
+                [
+                    "address already in use",
+                    "eaddrinuse",
+                    "bind: address",
+                ],
+            ),
+            (
+                "image_error",
+                [
+                    "exec format error",
+                    "no such file or directory",
+                    "not found",
+                    "executable file not found",
+                ],
+            ),
+            (
+                "startup_failure",
+                [
+                    "failed to start",
+                    "startup failed",
+                    "initialization failed",
+                    "failed to initialize",
+                ],
+            ),
         ]
 
         _SUGGESTED_CAUSES = {
@@ -216,17 +281,17 @@ class LogsCollector:
         """Return simulated log lines for demo mode."""
         if "payment-api" in pod_name:
             return [
-                f"2024-01-15T09:23:35Z INFO  Starting payment-api v1.5.2",
-                f"2024-01-15T09:23:36Z ERROR Failed to load config: secret 'db-credentials' not found",
-                f"2024-01-15T09:23:37Z FATAL Application startup failed",
+                "2024-01-15T09:23:35Z INFO  Starting payment-api v1.5.2",
+                "2024-01-15T09:23:36Z ERROR Failed to load config: secret 'db-credentials' not found",
+                "2024-01-15T09:23:37Z FATAL Application startup failed",
             ]
         if "analytics" in pod_name:
             return [
-                f"2024-01-15T08:55:12Z INFO  Processing batch job",
-                f"2024-01-15T08:57:31Z WARN  Memory usage at 97%",
-                f"2024-01-15T08:57:35Z ERROR Killed by OOM killer",
+                "2024-01-15T08:55:12Z INFO  Processing batch job",
+                "2024-01-15T08:57:31Z WARN  Memory usage at 97%",
+                "2024-01-15T08:57:35Z ERROR Killed by OOM killer",
             ]
         return [
             f"2024-01-15T09:00:00Z INFO  {pod_name} starting",
-            f"2024-01-15T09:00:01Z INFO  Ready",
+            "2024-01-15T09:00:01Z INFO  Ready",
         ]

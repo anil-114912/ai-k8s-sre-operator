@@ -1,10 +1,11 @@
 """Kubernetes API client with simulated fallback for demo mode."""
+
 from __future__ import annotations
 
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 # Valid explicit provider values accepted by CLUSTER_PROVIDER env var / Helm value.
 PROVIDER_AWS = "aws"
@@ -24,6 +25,7 @@ def _is_demo_mode() -> bool:
 # ---------------------------------------------------------------------------
 # Simulated cluster state for demo mode
 # ---------------------------------------------------------------------------
+
 
 def _make_simulated_cluster_state() -> Dict[str, Any]:
     """Build a realistic simulated cluster state with known incidents baked in.
@@ -46,11 +48,22 @@ def _make_simulated_cluster_state() -> Dict[str, Any]:
             "phase": "Running",
             "labels": {"app": "frontend", "version": "v2.1.0"},
             "container_statuses": [
-                {"name": "frontend", "restartCount": 0, "state": {"running": {"startedAt": _1h_ago}}}
+                {
+                    "name": "frontend",
+                    "restartCount": 0,
+                    "state": {"running": {"startedAt": _1h_ago}},
+                }
             ],
-            "containers": [{"name": "frontend", "image": "myregistry/frontend:v2.1.0",
-                            "resources": {"limits": {"memory": "256Mi", "cpu": "200m"},
-                                          "requests": {"memory": "128Mi", "cpu": "100m"}}}],
+            "containers": [
+                {
+                    "name": "frontend",
+                    "image": "myregistry/frontend:v2.1.0",
+                    "resources": {
+                        "limits": {"memory": "256Mi", "cpu": "200m"},
+                        "requests": {"memory": "128Mi", "cpu": "100m"},
+                    },
+                }
+            ],
         },
         {
             "name": "redis-master-0",
@@ -58,9 +71,7 @@ def _make_simulated_cluster_state() -> Dict[str, Any]:
             "workload": "redis-master",
             "phase": "Running",
             "labels": {"app": "redis", "role": "master"},
-            "container_statuses": [
-                {"name": "redis", "restartCount": 0, "state": {"running": {}}}
-            ],
+            "container_statuses": [{"name": "redis", "restartCount": 0, "state": {"running": {}}}],
             "containers": [{"name": "redis", "image": "redis:7.2", "resources": {}}],
         },
         # ---- CrashLoopBackOff: payment-api (missing secret) ----
@@ -189,7 +200,9 @@ def _make_simulated_cluster_state() -> Dict[str, Any]:
             "container_statuses": [
                 {"name": "prometheus", "restartCount": 0, "state": {"running": {}}}
             ],
-            "containers": [{"name": "prometheus", "image": "prom/prometheus:v2.50.1", "resources": {}}],
+            "containers": [
+                {"name": "prometheus", "image": "prom/prometheus:v2.50.1", "resources": {}}
+            ],
         },
     ]
 
@@ -202,7 +215,11 @@ def _make_simulated_cluster_state() -> Dict[str, Any]:
             "count": 18,
             "firstTimestamp": _30m_ago,
             "lastTimestamp": _5m_ago,
-            "involvedObject": {"kind": "Pod", "name": "payment-api-7d9f8b-xk2p9", "namespace": "production"},
+            "involvedObject": {
+                "kind": "Pod",
+                "name": "payment-api-7d9f8b-xk2p9",
+                "namespace": "production",
+            },
             "namespace": "production",
         },
         {
@@ -212,7 +229,11 @@ def _make_simulated_cluster_state() -> Dict[str, Any]:
             "count": 1,
             "firstTimestamp": _30m_ago,
             "lastTimestamp": _30m_ago,
-            "involvedObject": {"kind": "Pod", "name": "payment-api-7d9f8b-xk2p9", "namespace": "production"},
+            "involvedObject": {
+                "kind": "Pod",
+                "name": "payment-api-7d9f8b-xk2p9",
+                "namespace": "production",
+            },
             "namespace": "production",
         },
         # OOMKill events for analytics-worker
@@ -223,7 +244,11 @@ def _make_simulated_cluster_state() -> Dict[str, Any]:
             "count": 7,
             "firstTimestamp": _1h_ago,
             "lastTimestamp": _30m_ago,
-            "involvedObject": {"kind": "Pod", "name": "analytics-worker-8bf7c-p9qrs", "namespace": "production"},
+            "involvedObject": {
+                "kind": "Pod",
+                "name": "analytics-worker-8bf7c-p9qrs",
+                "namespace": "production",
+            },
             "namespace": "production",
         },
         # Image pull events for checkout-service
@@ -234,7 +259,11 @@ def _make_simulated_cluster_state() -> Dict[str, Any]:
             "count": 12,
             "firstTimestamp": _1h_ago,
             "lastTimestamp": _5m_ago,
-            "involvedObject": {"kind": "Pod", "name": "checkout-service-5bc4d-m7nop", "namespace": "staging"},
+            "involvedObject": {
+                "kind": "Pod",
+                "name": "checkout-service-5bc4d-m7nop",
+                "namespace": "staging",
+            },
             "namespace": "staging",
         },
         # Pending pod scheduling failure
@@ -245,7 +274,11 @@ def _make_simulated_cluster_state() -> Dict[str, Any]:
             "count": 30,
             "firstTimestamp": (now - timedelta(minutes=15)).isoformat(),
             "lastTimestamp": _5m_ago,
-            "involvedObject": {"kind": "Pod", "name": "data-pipeline-6c9f-qrstu", "namespace": "production"},
+            "involvedObject": {
+                "kind": "Pod",
+                "name": "data-pipeline-6c9f-qrstu",
+                "namespace": "production",
+            },
             "namespace": "production",
         },
         # Probe failure event
@@ -256,7 +289,11 @@ def _make_simulated_cluster_state() -> Dict[str, Any]:
             "count": 5,
             "firstTimestamp": _30m_ago,
             "lastTimestamp": _5m_ago,
-            "involvedObject": {"kind": "Pod", "name": "frontend-abc12-xyz99", "namespace": "production"},
+            "involvedObject": {
+                "kind": "Pod",
+                "name": "frontend-abc12-xyz99",
+                "namespace": "production",
+            },
             "namespace": "production",
         },
     ]
@@ -264,27 +301,57 @@ def _make_simulated_cluster_state() -> Dict[str, Any]:
     deployments = [
         {"name": "frontend", "namespace": "production", "replicas": 3, "availableReplicas": 3},
         {"name": "payment-api", "namespace": "production", "replicas": 3, "availableReplicas": 0},
-        {"name": "analytics-worker", "namespace": "production", "replicas": 2, "availableReplicas": 1},
+        {
+            "name": "analytics-worker",
+            "namespace": "production",
+            "replicas": 2,
+            "availableReplicas": 1,
+        },
         {"name": "checkout-service", "namespace": "staging", "replicas": 2, "availableReplicas": 0},
         {"name": "data-pipeline", "namespace": "production", "replicas": 1, "availableReplicas": 0},
     ]
 
     services = [
-        {"name": "payment-api", "namespace": "production", "type": "ClusterIP",
-         "selector": {"app": "payment-api"}, "ports": [{"port": 8080}]},
-        {"name": "frontend", "namespace": "production", "type": "ClusterIP",
-         "selector": {"app": "frontend"}, "ports": [{"port": 80}]},
-        {"name": "analytics-worker", "namespace": "production", "type": "ClusterIP",
-         "selector": {"app": "analytics-worker"}, "ports": [{"port": 9090}]},
+        {
+            "name": "payment-api",
+            "namespace": "production",
+            "type": "ClusterIP",
+            "selector": {"app": "payment-api"},
+            "ports": [{"port": 8080}],
+        },
+        {
+            "name": "frontend",
+            "namespace": "production",
+            "type": "ClusterIP",
+            "selector": {"app": "frontend"},
+            "ports": [{"port": 80}],
+        },
+        {
+            "name": "analytics-worker",
+            "namespace": "production",
+            "type": "ClusterIP",
+            "selector": {"app": "analytics-worker"},
+            "ports": [{"port": 9090}],
+        },
         # Mismatched service: orphaned-svc has no matching pods
-        {"name": "orphaned-svc", "namespace": "staging", "type": "ClusterIP",
-         "selector": {"app": "old-service", "version": "v1"}, "ports": [{"port": 8080}]},
+        {
+            "name": "orphaned-svc",
+            "namespace": "staging",
+            "type": "ClusterIP",
+            "selector": {"app": "old-service", "version": "v1"},
+            "ports": [{"port": 8080}],
+        },
     ]
 
     endpoints = [
         {"name": "payment-api", "namespace": "production", "subsets": []},  # No ready addresses
-        {"name": "frontend", "namespace": "production",
-         "subsets": [{"addresses": [{"ip": "10.0.0.1"}, {"ip": "10.0.0.2"}, {"ip": "10.0.0.3"}]}]},
+        {
+            "name": "frontend",
+            "namespace": "production",
+            "subsets": [
+                {"addresses": [{"ip": "10.0.0.1"}, {"ip": "10.0.0.2"}, {"ip": "10.0.0.3"}]}
+            ],
+        },
         {"name": "orphaned-svc", "namespace": "staging", "subsets": []},
     ]
 
@@ -295,11 +362,29 @@ def _make_simulated_cluster_state() -> Dict[str, Any]:
             "rules": [
                 {
                     "host": "api.example.com",
-                    "http": {"paths": [{"path": "/payments", "backend": {"service": {"name": "payment-api", "port": {"number": 8080}}}}]},
+                    "http": {
+                        "paths": [
+                            {
+                                "path": "/payments",
+                                "backend": {
+                                    "service": {"name": "payment-api", "port": {"number": 8080}}
+                                },
+                            }
+                        ]
+                    },
                 },
                 {
                     "host": "app.example.com",
-                    "http": {"paths": [{"path": "/", "backend": {"service": {"name": "frontend", "port": {"number": 80}}}}]},
+                    "http": {
+                        "paths": [
+                            {
+                                "path": "/",
+                                "backend": {
+                                    "service": {"name": "frontend", "port": {"number": 80}}
+                                },
+                            }
+                        ]
+                    },
                 },
             ],
         },
@@ -309,7 +394,16 @@ def _make_simulated_cluster_state() -> Dict[str, Any]:
             "rules": [
                 {
                     "host": "staging.example.com",
-                    "http": {"paths": [{"path": "/", "backend": {"service": {"name": "missing-backend", "port": {"number": 8080}}}}]},
+                    "http": {
+                        "paths": [
+                            {
+                                "path": "/",
+                                "backend": {
+                                    "service": {"name": "missing-backend", "port": {"number": 8080}}
+                                },
+                            }
+                        ]
+                    },
                 }
             ],
         },
@@ -436,7 +530,9 @@ class _SimulatedK8s:
         logger.info("[SIMULATED] rollout_restart: %s/%s", namespace, deployment)
         return {"status": "restarted", "deployment": deployment}
 
-    def rollback_deployment(self, namespace: str, deployment: str, revision: Any = None) -> Dict[str, Any]:
+    def rollback_deployment(
+        self, namespace: str, deployment: str, revision: Any = None
+    ) -> Dict[str, Any]:
         """Simulate deployment rollback."""
         logger.info("[SIMULATED] rollback: %s/%s to revision=%s", namespace, deployment, revision)
         return {"status": "rolled_back", "deployment": deployment}
@@ -446,7 +542,9 @@ class _SimulatedK8s:
         logger.info("[SIMULATED] scale: %s/%s -> %d", namespace, deployment, replicas)
         return {"status": "scaled", "replicas": replicas}
 
-    def patch_deployment(self, namespace: str, deployment: str, patch: Dict[str, Any]) -> Dict[str, Any]:
+    def patch_deployment(
+        self, namespace: str, deployment: str, patch: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Simulate deployment patch."""
         logger.info("[SIMULATED] patch: %s/%s", namespace, deployment)
         return {"status": "patched"}
@@ -467,6 +565,7 @@ class RealK8sClient:
         SSL certificate verification issues on macOS.
         """
         import kubernetes
+
         try:
             kubernetes.config.load_incluster_config()
             logger.info("RealK8sClient initialised from in-cluster config")
@@ -482,6 +581,7 @@ class RealK8sClient:
         if not config.ssl_ca_cert:
             try:
                 import certifi
+
                 config.ssl_ca_cert = certifi.where()
                 logger.info("Using certifi CA bundle for K8s API SSL: %s", config.ssl_ca_cert)
             except ImportError:
@@ -540,14 +640,28 @@ class RealK8sClient:
                     return PROVIDER_GCP
 
                 # Label-based checks for clusters where providerID may be empty
-                if any(k.startswith("eks.amazonaws.com") or k.startswith("alpha.eksctl.io") for k in labels):
+                if any(
+                    k.startswith("eks.amazonaws.com") or k.startswith("alpha.eksctl.io")
+                    for k in labels
+                ):
                     return PROVIDER_AWS
-                if any(k in labels for k in ("kubernetes.azure.com/cluster", "agentpool",
-                                              "kubernetes.azure.com/agentpool")):
+                if any(
+                    k in labels
+                    for k in (
+                        "kubernetes.azure.com/cluster",
+                        "agentpool",
+                        "kubernetes.azure.com/agentpool",
+                    )
+                ):
                     return PROVIDER_AZURE
-                if any(k in labels for k in ("cloud.google.com/gke-nodepool",
-                                              "topology.gke.io/zone",
-                                              "cloud.google.com/gke-boot-disk")):
+                if any(
+                    k in labels
+                    for k in (
+                        "cloud.google.com/gke-nodepool",
+                        "topology.gke.io/zone",
+                        "cloud.google.com/gke-boot-disk",
+                    )
+                ):
                     return PROVIDER_GCP
 
         except Exception as exc:
@@ -576,52 +690,68 @@ class RealK8sClient:
 
             svc_list = self._core.list_service_for_all_namespaces(watch=False)
             for svc in svc_list.items:
-                state["services"].append({
-                    "name": svc.metadata.name,
-                    "namespace": svc.metadata.namespace,
-                    "type": svc.spec.type,
-                    "selector": svc.spec.selector or {},
-                })
+                state["services"].append(
+                    {
+                        "name": svc.metadata.name,
+                        "namespace": svc.metadata.namespace,
+                        "type": svc.spec.type,
+                        "selector": svc.spec.selector or {},
+                    }
+                )
 
             ev_list = self._core.list_event_for_all_namespaces(watch=False)
             for ev in ev_list.items:
-                state["events"].append({
-                    "reason": ev.reason,
-                    "message": ev.message,
-                    "type": ev.type,
-                    "count": ev.count,
-                    "firstTimestamp": ev.first_timestamp.isoformat() if ev.first_timestamp else None,
-                    "lastTimestamp": ev.last_timestamp.isoformat() if ev.last_timestamp else None,
-                    "involvedObject": {
-                        "kind": ev.involved_object.kind,
-                        "name": ev.involved_object.name,
-                        "namespace": ev.involved_object.namespace,
-                    },
-                    "namespace": ev.metadata.namespace,
-                })
+                state["events"].append(
+                    {
+                        "reason": ev.reason,
+                        "message": ev.message,
+                        "type": ev.type,
+                        "count": ev.count,
+                        "firstTimestamp": ev.first_timestamp.isoformat()
+                        if ev.first_timestamp
+                        else None,
+                        "lastTimestamp": ev.last_timestamp.isoformat()
+                        if ev.last_timestamp
+                        else None,
+                        "involvedObject": {
+                            "kind": ev.involved_object.kind,
+                            "name": ev.involved_object.name,
+                            "namespace": ev.involved_object.namespace,
+                        },
+                        "namespace": ev.metadata.namespace,
+                    }
+                )
 
             node_list = self._core.list_node(watch=False)
             for node in node_list.items:
-                state["nodes"].append({
-                    "name": node.metadata.name,
-                    "allocatable": {
-                        "cpu": str(node.status.allocatable.get("cpu", "0")),
-                        "memory": str(node.status.allocatable.get("memory", "0")),
-                    },
-                    "capacity": {
-                        "cpu": str(node.status.capacity.get("cpu", "0")),
-                        "memory": str(node.status.capacity.get("memory", "0")),
-                    },
-                })
+                state["nodes"].append(
+                    {
+                        "name": node.metadata.name,
+                        "allocatable": {
+                            "cpu": str(node.status.allocatable.get("cpu", "0")),
+                            "memory": str(node.status.allocatable.get("memory", "0")),
+                        },
+                        "capacity": {
+                            "cpu": str(node.status.capacity.get("cpu", "0")),
+                            "memory": str(node.status.capacity.get("memory", "0")),
+                        },
+                    }
+                )
         except Exception as exc:
             import traceback
+
             logger.error("RealK8sClient.get_cluster_state FAILED: %s: %s", type(exc).__name__, exc)
             logger.error("get_cluster_state traceback:\n%s", traceback.format_exc())
 
         # Second pass: fetch previous container logs for unhealthy pods
         _UNHEALTHY_REASONS = {
-            "CrashLoopBackOff", "OOMKilled", "Error", "ImagePullBackOff",
-            "ErrImagePull", "CreateContainerConfigError", "CreateContainerError",
+            "CrashLoopBackOff",
+            "OOMKilled",
+            "Error",
+            "ImagePullBackOff",
+            "ErrImagePull",
+            "CreateContainerConfigError",
+            "CreateContainerError",
         }
         unhealthy_count = 0
         for pod in state["pods"]:
@@ -653,7 +783,11 @@ class RealK8sClient:
                         tail_lines=80,
                     )
                     state["recent_logs"][log_key] = log_text.splitlines()
-                    logger.info("Fetched previous logs for %s (%d lines)", log_key, len(state["recent_logs"][log_key]))
+                    logger.info(
+                        "Fetched previous logs for %s (%d lines)",
+                        log_key,
+                        len(state["recent_logs"][log_key]),
+                    )
                     unhealthy_count += 1
                 except Exception as log_exc:
                     logger.debug("Could not fetch logs for %s: %s", log_key, log_exc)
@@ -664,7 +798,7 @@ class RealK8sClient:
     def _parse_pod(pod: Any) -> Dict[str, Any]:
         """Parse a kubernetes Pod object into a flat dict."""
         cs_list = []
-        for cs in (pod.status.container_statuses or []):
+        for cs in pod.status.container_statuses or []:
             state_dict: Dict[str, Any] = {}
             if cs.state.waiting:
                 state_dict["waiting"] = {
@@ -684,34 +818,42 @@ class RealK8sClient:
                     "reason": cs.last_state.terminated.reason,
                     "exitCode": cs.last_state.terminated.exit_code,
                 }
-            cs_list.append({
-                "name": cs.name,
-                "restartCount": cs.restart_count,
-                "state": state_dict,
-                "lastState": last_state_dict,
-            })
+            cs_list.append(
+                {
+                    "name": cs.name,
+                    "restartCount": cs.restart_count,
+                    "state": state_dict,
+                    "lastState": last_state_dict,
+                }
+            )
         containers = []
-        for c in (pod.spec.containers or []):
+        for c in pod.spec.containers or []:
             res = {}
             if c.resources:
                 if c.resources.limits:
                     res["limits"] = dict(c.resources.limits)
                 if c.resources.requests:
                     res["requests"] = dict(c.resources.requests)
-            containers.append({
-                "name": c.name,
-                "image": c.image,
-                "resources": res,
-            })
+            containers.append(
+                {
+                    "name": c.name,
+                    "image": c.image,
+                    "resources": res,
+                }
+            )
         return {
             "name": pod.metadata.name,
             "namespace": pod.metadata.namespace,
-            "workload": pod.metadata.name.rsplit("-", 2)[0] if "-" in pod.metadata.name else pod.metadata.name,
+            "workload": pod.metadata.name.rsplit("-", 2)[0]
+            if "-" in pod.metadata.name
+            else pod.metadata.name,
             "phase": pod.status.phase or "Unknown",
             "labels": pod.metadata.labels or {},
             "container_statuses": cs_list,
             "containers": containers,
-            "creationTimestamp": pod.metadata.creation_timestamp.isoformat() if pod.metadata.creation_timestamp else None,
+            "creationTimestamp": pod.metadata.creation_timestamp.isoformat()
+            if pod.metadata.creation_timestamp
+            else None,
         }
 
     def delete_pod(self, namespace: str, pod_name: str) -> Dict[str, Any]:
@@ -721,8 +863,8 @@ class RealK8sClient:
 
     def rollout_restart(self, namespace: str, deployment: str) -> Dict[str, Any]:
         """Trigger a rolling restart via annotation patch."""
-        import kubernetes
         from datetime import datetime
+
         patch = {
             "spec": {
                 "template": {
@@ -737,9 +879,12 @@ class RealK8sClient:
         self._apps.patch_namespaced_deployment(name=deployment, namespace=namespace, body=patch)
         return {"status": "restarted"}
 
-    def rollback_deployment(self, namespace: str, deployment: str, revision: Any = None) -> Dict[str, Any]:
+    def rollback_deployment(
+        self, namespace: str, deployment: str, revision: Any = None
+    ) -> Dict[str, Any]:
         """Simulate rollback via kubectl."""
         import subprocess
+
         cmd = ["kubectl", "rollout", "undo", f"deployment/{deployment}", "-n", namespace]
         if revision:
             cmd.extend(["--to-revision", str(revision)])
@@ -752,7 +897,9 @@ class RealK8sClient:
         self._apps.patch_namespaced_deployment(name=deployment, namespace=namespace, body=patch)
         return {"status": "scaled", "replicas": replicas}
 
-    def patch_deployment(self, namespace: str, deployment: str, patch: Dict[str, Any]) -> Dict[str, Any]:
+    def patch_deployment(
+        self, namespace: str, deployment: str, patch: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Apply a strategic merge patch to a deployment."""
         self._apps.patch_namespaced_deployment(name=deployment, namespace=namespace, body=patch)
         return {"status": "patched"}
@@ -778,9 +925,11 @@ def get_k8s_client():
         return client
     except Exception as exc:
         import traceback
+
         logger.error(
             "get_k8s_client: RealK8sClient FAILED (%s: %s) — falling back to simulation",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
         )
         logger.error("get_k8s_client traceback:\n%s", traceback.format_exc())
         return _SimulatedK8s()

@@ -1,4 +1,5 @@
 """Detector for pods stuck in Pending state."""
+
 from __future__ import annotations
 
 import logging
@@ -41,7 +42,9 @@ class PendingPodsDetector(BaseDetector):
 
             pod_name = pod.get("name", "")
             namespace = pod.get("namespace", "default")
-            workload = pod.get("workload", pod_name.rsplit("-", 2)[0] if "-" in pod_name else pod_name)
+            workload = pod.get(
+                "workload", pod_name.rsplit("-", 2)[0] if "-" in pod_name else pod_name
+            )
 
             # Check pending duration
             creation_ts = pod.get("creationTimestamp", "")
@@ -91,8 +94,7 @@ class PendingPodsDetector(BaseDetector):
                 for r in scheduling_reasons
             )
             taint_toleration = any(
-                "taint" in r.lower() or "toleration" in r.lower()
-                for r in scheduling_reasons
+                "taint" in r.lower() or "toleration" in r.lower() for r in scheduling_reasons
             )
             pvc_not_bound = any(
                 "pvc" in r.lower() or "persistentvolumeclaim" in r.lower()
@@ -145,8 +147,6 @@ class PendingPodsDetector(BaseDetector):
                     },
                 )
             )
-            logger.info(
-                "Pending pod detected: pod=%s pending_secs=%d", pod_name, int(pending_secs)
-            )
+            logger.info("Pending pod detected: pod=%s pending_secs=%d", pod_name, int(pending_secs))
 
         return results

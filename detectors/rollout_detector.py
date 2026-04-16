@@ -1,4 +1,5 @@
 """Detector for failed Deployment rollouts."""
+
 from __future__ import annotations
 
 import logging
@@ -35,8 +36,6 @@ class RolloutDetector(BaseDetector):
             conditions = dep.get("conditions", [])
 
             # Check for Available=False or ProgressDeadlineExceeded
-            available = True
-            progressing = True
             progress_deadline_exceeded = False
             available_false = False
 
@@ -46,12 +45,11 @@ class RolloutDetector(BaseDetector):
                 reason = cond.get("reason", "")
 
                 if cond_type == "Available" and cond_status == "False":
-                    available = False
                     available_false = True
 
                 if cond_type == "Progressing":
                     if cond_status == "False":
-                        progressing = False
+                        pass
                     if reason == "ProgressDeadlineExceeded":
                         progress_deadline_exceeded = True
 
@@ -61,11 +59,14 @@ class RolloutDetector(BaseDetector):
             # Check replica counts
             desired = dep.get("desiredReplicas", dep.get("replicas", 0))
             available_replicas = dep.get("availableReplicas", 0)
-            unavailable_replicas = dep.get("unavailableReplicas", desired - available_replicas if desired else 0)
+            unavailable_replicas = dep.get(
+                "unavailableReplicas", desired - available_replicas if desired else 0
+            )
 
             # Collect relevant events
             dep_events = [
-                e for e in events
+                e
+                for e in events
                 if e.get("involvedObject", {}).get("name", "").startswith(dep_name)
                 and e.get("namespace") == namespace
             ]
@@ -79,7 +80,7 @@ class RolloutDetector(BaseDetector):
                     self._make_evidence(
                         source="detector",
                         content=f"Deployment '{dep_name}' rollout has exceeded progress deadline. "
-                                f"Desired={desired}, Available={available_replicas}, Unavailable={unavailable_replicas}",
+                        f"Desired={desired}, Available={available_replicas}, Unavailable={unavailable_replicas}",
                         relevance=1.0,
                     )
                 )
@@ -88,7 +89,7 @@ class RolloutDetector(BaseDetector):
                     self._make_evidence(
                         source="detector",
                         content=f"Deployment '{dep_name}' condition Available=False. "
-                                f"{unavailable_replicas} replicas unavailable.",
+                        f"{unavailable_replicas} replicas unavailable.",
                         relevance=0.95,
                     )
                 )
@@ -97,12 +98,14 @@ class RolloutDetector(BaseDetector):
                 evidence.append(
                     self._make_evidence(
                         source="k8s_events",
-                        content=f"Rollout event: reason={ev.get('reason','?')}, message={ev.get('message','?')}",
+                        content=f"Rollout event: reason={ev.get('reason', '?')}, message={ev.get('message', '?')}",
                         relevance=0.8,
                     )
                 )
 
-            reason_str = "ProgressDeadlineExceeded" if progress_deadline_exceeded else "Available=False"
+            reason_str = (
+                "ProgressDeadlineExceeded" if progress_deadline_exceeded else "Available=False"
+            )
 
             results.append(
                 DetectionResult(
@@ -125,7 +128,9 @@ class RolloutDetector(BaseDetector):
             )
             logger.info(
                 "FailedRollout detected: %s/%s reason=%s",
-                namespace, dep_name, reason_str,
+                namespace,
+                dep_name,
+                reason_str,
             )
 
         return results

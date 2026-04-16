@@ -1,4 +1,5 @@
 """Detector for CNI plugin failures and IP exhaustion."""
+
 from __future__ import annotations
 
 import logging
@@ -49,7 +50,7 @@ class CNIDetector(BaseDetector):
         """
         results: List[DetectionResult] = []
         events = cluster_state.get("events", [])
-        nodes = cluster_state.get("nodes", [])
+        cluster_state.get("nodes", [])
         recent_logs = cluster_state.get("recent_logs", {})
 
         seen: Dict[str, bool] = {}
@@ -63,9 +64,8 @@ class CNIDetector(BaseDetector):
             node_name = involved.get("name", event.get("name", "unknown"))
             namespace = event.get("namespace", "default")
 
-            is_cni = (
-                "networkpluginnotready" in reason.lower()
-                or any(p.lower() in message_lower for p in CNI_EVENT_PATTERNS)
+            is_cni = "networkpluginnotready" in reason.lower() or any(
+                p.lower() in message_lower for p in CNI_EVENT_PATTERNS
             )
             if not is_cni:
                 continue
@@ -75,7 +75,11 @@ class CNIDetector(BaseDetector):
                 continue
             seen[key] = True
 
-            severity = "critical" if "exhausted" in message_lower or "no available ip" in message_lower else "high"
+            severity = (
+                "critical"
+                if "exhausted" in message_lower or "no available ip" in message_lower
+                else "high"
+            )
 
             evidence: List[Evidence] = [
                 self._make_evidence(

@@ -1,33 +1,33 @@
 """Detectors package — deterministic failure detection for Kubernetes resources."""
+
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
 
 from detectors.base import BaseDetector, DetectionResult
+from detectors.cni_detector import CNIDetector
 
 # Original 9 detectors
 from detectors.crashloop_detector import CrashLoopDetector
-from detectors.oomkill_detector import OOMKillDetector
+from detectors.dns_detector import DNSDetector
+from detectors.hpa_detector import HPADetector
 from detectors.imagepull_detector import ImagePullDetector
+from detectors.ingress_detector import IngressDetector
+from detectors.network_policy_detector import NetworkPolicyDetector
+from detectors.node_pressure_detector import NodePressureDetector
+from detectors.oomkill_detector import OOMKillDetector
 from detectors.pending_pods_detector import PendingPodsDetector
 from detectors.probe_failure_detector import ProbeFailureDetector
-from detectors.service_detector import ServiceDetector
-from detectors.ingress_detector import IngressDetector
 from detectors.pvc_detector import PVCDetector
-from detectors.hpa_detector import HPADetector
 
 # New 9 detectors
 from detectors.quota_detector import QuotaDetector
-from detectors.dns_detector import DNSDetector
 from detectors.rbac_detector import RBACDetector
-from detectors.network_policy_detector import NetworkPolicyDetector
-from detectors.cni_detector import CNIDetector
-from detectors.service_mesh_detector import ServiceMeshDetector
-from detectors.node_pressure_detector import NodePressureDetector
-from detectors.storage_detector import StorageDetector
 from detectors.rollout_detector import RolloutDetector
-
-import logging
+from detectors.service_detector import ServiceDetector
+from detectors.service_mesh_detector import ServiceMeshDetector
+from detectors.storage_detector import StorageDetector
 
 logger = logging.getLogger(__name__)
 

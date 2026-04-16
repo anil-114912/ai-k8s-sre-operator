@@ -1,4 +1,5 @@
 """Structured failure pattern knowledge base loader and search engine."""
+
 from __future__ import annotations
 
 import logging
@@ -59,8 +60,7 @@ class FailureKnowledgeBase:
             return
 
         yaml_files = [
-            f for f in os.listdir(self._kb_dir)
-            if f.endswith(".yaml") or f.endswith(".yml")
+            f for f in os.listdir(self._kb_dir) if f.endswith(".yaml") or f.endswith(".yml")
         ]
 
         for filename in sorted(yaml_files):
@@ -188,6 +188,7 @@ class FailureKnowledgeBase:
 
             if score > 0:
                 import copy
+
                 p = copy.copy(pattern)
                 p.score = round(score, 4)
                 scored.append(p)

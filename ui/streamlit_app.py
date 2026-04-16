@@ -1,24 +1,25 @@
 """Streamlit dashboard — dark futuristic incident management UI."""
+
 from __future__ import annotations
 
-import json
 import os
-import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 # Load .env from project root so DEMO_MODE, KUBECONFIG, etc. are available
 try:
     from dotenv import load_dotenv as _load_dotenv
+
     _load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
 except ImportError:
     pass
 
+# Suppress harmless Tornado WebSocket closed errors during tab switches/refreshes
+import logging
+
 import httpx
 import streamlit as st
 
-# Suppress harmless Tornado WebSocket closed errors during tab switches/refreshes
-import logging
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
 # Shared httpx client — disable SSL verification for local API calls.
@@ -38,6 +39,7 @@ def _get_api_base() -> str:
     if not url.startswith("http://") and not url.startswith("https://"):
         url = f"http://{url}"
     return url.rstrip("/")
+
 
 # ---------------------------------------------------------------------------
 # Page configuration
@@ -86,6 +88,7 @@ st.markdown(
 # ---------------------------------------------------------------------------
 # API helpers
 # ---------------------------------------------------------------------------
+
 
 def api_get(path: str) -> Optional[Any]:
     """Make a GET request to the API."""
@@ -156,7 +159,7 @@ with st.sidebar:
         is_demo = health.get("demo_mode", True)
         cluster_mode = health.get("cluster", "simulated")
         if is_demo:
-            st.warning(f"🎮 Demo Mode — simulated cluster")
+            st.warning("🎮 Demo Mode — simulated cluster")
         else:
             st.success(f"✅ Live Cluster — {cluster_mode}")
         st.caption(f"API v{health.get('version', '?')}")
@@ -179,12 +182,12 @@ if summary:
     score = summary.get("health_score", 0)
     score_color = "green" if score > 80 else ("orange" if score > 50 else "red")
     cols[0].metric("Health Score", f"{score:.0f}/100")
-    cols[1].metric("Nodes", f"{summary.get('ready_nodes',0)}/{summary.get('total_nodes',0)}")
+    cols[1].metric("Nodes", f"{summary.get('ready_nodes', 0)}/{summary.get('total_nodes', 0)}")
     cols[2].metric("Pods Running", summary.get("running_pods", 0))
     cols[3].metric("Pending", summary.get("pending_pods", 0), delta_color="inverse")
     cols[4].metric("CrashLoop", summary.get("crashloop_pods", 0), delta_color="inverse")
     cols[5].metric("Active Incidents", summary.get("active_incidents", 0), delta_color="inverse")
-    cols[6].metric("PVCs Bound", f"{summary.get('bound_pvcs',0)}/{summary.get('total_pvcs',0)}")
+    cols[6].metric("PVCs Bound", f"{summary.get('bound_pvcs', 0)}/{summary.get('total_pvcs', 0)}")
 
 st.markdown("---")
 
@@ -192,15 +195,17 @@ st.markdown("---")
 # Tabs
 # ---------------------------------------------------------------------------
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "⚡ Live Incidents",
-    "🧠 RCA Analysis",
-    "🔧 Remediation",
-    "📚 Incident History",
-    "🔍 Cluster Scan",
-    "📖 Knowledge Base",
-    "🧪 Learning & Feedback",
-])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+    [
+        "⚡ Live Incidents",
+        "🧠 RCA Analysis",
+        "🔧 Remediation",
+        "📚 Incident History",
+        "🔍 Cluster Scan",
+        "📖 Knowledge Base",
+        "🧪 Learning & Feedback",
+    ]
+)
 
 # ---------------------------------------------------------------------------
 # Tab 1: Live Incidents
@@ -232,12 +237,12 @@ with tab1:
             icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(sev, "⚪")
 
             with st.expander(
-                f"{icon} [{inc.get('incident_type','?')}] {inc.get('workload','?')} / {inc.get('namespace','?')} — {inc.get('title','')[:60]}"
+                f"{icon} [{inc.get('incident_type', '?')}] {inc.get('workload', '?')} / {inc.get('namespace', '?')} — {inc.get('title', '')[:60]}"
             ):
                 c1, c2, c3 = st.columns(3)
                 c1.markdown(f"**Severity:** {severity_badge(sev)}", unsafe_allow_html=True)
                 c2.markdown(f"**Status:** `{status}`")
-                c3.markdown(f"**Detected:** `{inc.get('detected_at','')[:19]}`")
+                c3.markdown(f"**Detected:** `{inc.get('detected_at', '')[:19]}`")
 
                 if inc.get("root_cause"):
                     st.info(f"🎯 Root Cause: {inc['root_cause']}")
@@ -320,11 +325,11 @@ with tab2:
             st.markdown(f"#### {inc_data.get('title')}")
             c1, c2, c3 = st.columns(3)
             c1.markdown(
-                f"**Severity:** {severity_badge(inc_data.get('severity','?'))}",
+                f"**Severity:** {severity_badge(inc_data.get('severity', '?'))}",
                 unsafe_allow_html=True,
             )
-            c2.markdown(f"**Type:** `{inc_data.get('incident_type','?')}`")
-            c3.markdown(f"**Status:** `{inc_data.get('status','?')}`")
+            c2.markdown(f"**Type:** `{inc_data.get('incident_type', '?')}`")
+            c3.markdown(f"**Status:** `{inc_data.get('status', '?')}`")
 
             if st.button("▶️ Run Full AI Analysis", type="primary"):
                 with st.spinner("Correlating signals, retrieving past incidents, calling AI..."):
@@ -338,7 +343,9 @@ with tab2:
                 st.error(inc_data["root_cause"])
 
                 if inc_data.get("confidence"):
-                    st.progress(inc_data["confidence"], text=f"Confidence: {inc_data['confidence']:.0%}")
+                    st.progress(
+                        inc_data["confidence"], text=f"Confidence: {inc_data['confidence']:.0%}"
+                    )
 
             if inc_data.get("ai_explanation"):
                 st.markdown("#### 📖 AI Explanation")
@@ -360,8 +367,8 @@ with tab2:
             # Knowledge Base Matches
             if inc_id:
                 kb_results = api_get(
-                    f"/api/v1/knowledge/search?q={inc_data.get('incident_type','')}"
-                    f"+{inc_data.get('namespace','')}&top_k=3"
+                    f"/api/v1/knowledge/search?q={inc_data.get('incident_type', '')}"
+                    f"+{inc_data.get('namespace', '')}&top_k=3"
                 )
                 if kb_results:
                     st.markdown("#### 📖 Knowledge Base Matches")
@@ -369,13 +376,13 @@ with tab2:
                         score = kb.get("score", 0)
                         safety = kb.get("safety_level", "suggest_only")
                         with st.expander(
-                            f"[{kb.get('id','?')}] {kb.get('title','')} — score={score:.2f}"
+                            f"[{kb.get('id', '?')}] {kb.get('title', '')} — score={score:.2f}"
                         ):
                             st.markdown(
                                 f"**Safety:** {safety_badge(safety)}",
                                 unsafe_allow_html=True,
                             )
-                            st.markdown(f"**Root cause:** {kb.get('root_cause','')}")
+                            st.markdown(f"**Root cause:** {kb.get('root_cause', '')}")
                             steps = kb.get("remediation_steps", [])
                             if steps:
                                 st.markdown("**Remediation steps:**")
@@ -383,9 +390,7 @@ with tab2:
                                     st.markdown(f"{i}. {step}")
                             tags = kb.get("tags", [])
                             if tags:
-                                st.markdown(
-                                    " ".join(f"`{t}`" for t in tags)
-                                )
+                                st.markdown(" ".join(f"`{t}`" for t in tags))
 
             # Similar Past Incidents
             if inc_id:
@@ -393,11 +398,17 @@ with tab2:
                 if similar_data:
                     st.markdown("#### 🔁 Similar Past Incidents")
                     for sim in similar_data[:3]:
-                        outcome = sim.get("resolution_outcome") or ("resolved" if sim.get("resolved") else None)
-                        feedback_icon = "✅" if outcome == "resolved" else ("❌" if outcome == "failed" else "—")
+                        outcome = sim.get("resolution_outcome") or (
+                            "resolved" if sim.get("resolved") else None
+                        )
+                        feedback_icon = (
+                            "✅"
+                            if outcome == "resolved"
+                            else ("❌" if outcome == "failed" else "—")
+                        )
                         with st.expander(
                             f"{feedback_icon} similarity={sim.get('similarity', 0):.2f} | "
-                            f"{sim.get('type','?')} in {sim.get('namespace','?')}"
+                            f"{sim.get('type', '?')} in {sim.get('namespace', '?')}"
                         ):
                             if sim.get("root_cause"):
                                 st.markdown(f"**Root cause:** {sim['root_cause']}")
@@ -424,7 +435,7 @@ with tab3:
         if plan_data:
             st.markdown(f"**Plan:** {plan_data.get('summary')}")
             st.markdown(
-                f"**Overall Safety:** {safety_badge(plan_data.get('overall_safety_level','?'))}",
+                f"**Overall Safety:** {safety_badge(plan_data.get('overall_safety_level', '?'))}",
                 unsafe_allow_html=True,
             )
 
@@ -438,10 +449,14 @@ with tab3:
             st.markdown("#### Steps")
             for step in plan_data.get("steps", []):
                 level = step.get("safety_level", "?")
-                level_label = {"auto_fix": "L1: AUTO", "approval_required": "L2: APPROVAL", "suggest_only": "L3: SUGGEST"}.get(level, level)
+                level_label = {
+                    "auto_fix": "L1: AUTO",
+                    "approval_required": "L2: APPROVAL",
+                    "suggest_only": "L3: SUGGEST",
+                }.get(level, level)
                 with st.expander(f"Step {step['order']}: {step['action']} [{level_label}]"):
                     st.markdown(safety_badge(level), unsafe_allow_html=True)
-                    st.markdown(f"**Description:** {step.get('description','')}")
+                    st.markdown(f"**Description:** {step.get('description', '')}")
                     if step.get("command"):
                         st.code(step["command"], language="bash")
                     st.markdown(
@@ -484,21 +499,28 @@ with tab4:
         try:
             import pandas as pd
             import plotly.express as px
+
             df_cp = pd.DataFrame(cluster_patterns)
             if not df_cp.empty:
                 fig = px.bar(
-                    df_cp, x="incident_type", y="count",
+                    df_cp,
+                    x="incident_type",
+                    y="count",
                     title="Top 5 Failure Types in This Cluster",
-                    color="count", color_continuous_scale="reds",
+                    color="count",
+                    color_continuous_scale="reds",
                 )
                 fig.update_layout(
-                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
                     showlegend=False,
                 )
                 st.plotly_chart(fig, use_container_width=True)
         except Exception:
             for cp in cluster_patterns:
-                st.markdown(f"- **{cp.get('incident_type','?')}**: {cp.get('count',0)} occurrences")
+                st.markdown(
+                    f"- **{cp.get('incident_type', '?')}**: {cp.get('count', 0)} occurrences"
+                )
 
     st.markdown("---")
 
@@ -524,7 +546,7 @@ with tab4:
 
         st.markdown(f"**Total incidents:** {len(history)}")
         resolved = sum(1 for i in history if i.get("status") in ("resolved", "closed"))
-        st.markdown(f"**Resolved:** {resolved} ({resolved/len(history):.0%})")
+        st.markdown(f"**Resolved:** {resolved} ({resolved / len(history):.0%})")
     else:
         st.info("No incident history yet. Run a cluster scan to generate incidents.")
 
@@ -543,7 +565,9 @@ with tab5:
             params = f"?namespace={scan_ns}" if scan_ns else ""
             result = api_post(f"/api/v1/scan{params}")
         if result:
-            st.success(f"✅ Scan complete: {result.get('total_detections', 0)} detections, {result.get('incidents_created', 0)} incidents created")
+            st.success(
+                f"✅ Scan complete: {result.get('total_detections', 0)} detections, {result.get('incidents_created', 0)} incidents created"
+            )
             if result.get("incident_ids"):
                 st.markdown("**Created incidents:**")
                 for iid in result["incident_ids"]:
@@ -556,11 +580,14 @@ with tab5:
     if summary:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Health Score", f"{summary.get('health_score', 0):.0f}/100")
-        c2.metric("Nodes Ready", f"{summary.get('ready_nodes',0)}/{summary.get('total_nodes',0)}")
-        c3.metric("Deployments Available", f"{summary.get('available_deployments',0)}/{summary.get('total_deployments',0)}")
-        c4.metric("PVCs Bound", f"{summary.get('bound_pvcs',0)}/{summary.get('total_pvcs',0)}")
+        c2.metric("Nodes Ready", f"{summary.get('ready_nodes', 0)}/{summary.get('total_nodes', 0)}")
+        c3.metric(
+            "Deployments Available",
+            f"{summary.get('available_deployments', 0)}/{summary.get('total_deployments', 0)}",
+        )
+        c4.metric("PVCs Bound", f"{summary.get('bound_pvcs', 0)}/{summary.get('total_pvcs', 0)}")
 
-        st.markdown(f"**Summary:** {summary.get('summary','')}")
+        st.markdown(f"**Summary:** {summary.get('summary', '')}")
 
 # ---------------------------------------------------------------------------
 # Tab 6: Knowledge Base
@@ -599,9 +626,7 @@ with tab6:
                     tag_set.add(t)
         all_tags = sorted(tag_set)
 
-    tag_filter = col_tag.selectbox(
-        "Filter by tag", ["All"] + all_tags, key="kb_tag_filter"
-    )
+    tag_filter = col_tag.selectbox("Filter by tag", ["All"] + all_tags, key="kb_tag_filter")
 
     # Search or list
     if kb_query:
@@ -624,14 +649,10 @@ with tab6:
             tags = p.get("tags", [])
             tag_str = " ".join(f"`{t}`" for t in tags if isinstance(t, str))
 
-            with st.expander(
-                f"[{p.get('id','?')}] {p.get('title','')}{score_str}"
-            ):
+            with st.expander(f"[{p.get('id', '?')}] {p.get('title', '')}{score_str}"):
                 col_a, col_b = st.columns([3, 1])
-                col_a.markdown(f"**Root cause:** {p.get('root_cause','')}")
-                col_b.markdown(
-                    f"**Safety:** {safety_badge(safety)}", unsafe_allow_html=True
-                )
+                col_a.markdown(f"**Root cause:** {p.get('root_cause', '')}")
+                col_b.markdown(f"**Safety:** {safety_badge(safety)}", unsafe_allow_html=True)
 
                 steps = p.get("remediation_steps", [])
                 if steps:
@@ -692,20 +713,25 @@ with tab7:
             try:
                 import pandas as pd
                 import plotly.express as px
+
                 df_types = pd.DataFrame(top_types)
                 fig = px.bar(
-                    df_types, x="type", y="count",
+                    df_types,
+                    x="type",
+                    y="count",
                     title="Most Frequent Incident Types",
-                    color="count", color_continuous_scale="blues",
+                    color="count",
+                    color_continuous_scale="blues",
                 )
                 fig.update_layout(
-                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
                     showlegend=False,
                 )
                 st.plotly_chart(fig, use_container_width=True)
             except Exception:
                 for t in top_types:
-                    st.markdown(f"- **{t.get('type','?')}**: {t.get('count',0)}")
+                    st.markdown(f"- **{t.get('type', '?')}**: {t.get('count', 0)}")
 
     st.markdown("---")
 
@@ -717,7 +743,8 @@ with tab7:
     )
 
     fb_inc_id = st.text_input(
-        "Incident ID", key="fb_loop_inc_id",
+        "Incident ID",
+        key="fb_loop_inc_id",
         placeholder="paste incident UUID from Live Incidents tab",
     )
 
@@ -726,9 +753,9 @@ with tab7:
         fb_inc = api_get(f"/api/v1/incidents/{fb_inc_id}")
         if fb_inc:
             st.markdown(
-                f"**{fb_inc.get('title','')}** — "
-                f"{severity_badge(fb_inc.get('severity','?'))} "
-                f"`{fb_inc.get('incident_type','?')}`",
+                f"**{fb_inc.get('title', '')}** — "
+                f"{severity_badge(fb_inc.get('severity', '?'))} "
+                f"`{fb_inc.get('incident_type', '?')}`",
                 unsafe_allow_html=True,
             )
             if fb_inc.get("root_cause"):
@@ -850,8 +877,8 @@ Incident #3: CrashLoop in payments/order-svc → AI says "missing secret" (88% c
     if all_learned:
         for p in all_learned:
             icon = "🎓" if "promoted" in (p.get("id") or "") else "🔍"
-            with st.expander(f"{icon} [{p.get('id','?')}] {p.get('title','')}"):
-                st.markdown(f"**Root cause:** {p.get('root_cause','')}")
+            with st.expander(f"{icon} [{p.get('id', '?')}] {p.get('title', '')}"):
+                st.markdown(f"**Root cause:** {p.get('root_cause', '')}")
                 steps = p.get("remediation_steps", [])
                 if steps:
                     st.markdown("**Remediation:**")

@@ -1,23 +1,22 @@
 """Tests for the 9 new incident detectors added in the Hybrid Learning Architecture."""
+
 from __future__ import annotations
 
-import pytest
-
-from detectors.quota_detector import QuotaDetector
-from detectors.dns_detector import DNSDetector
-from detectors.rbac_detector import RBACDetector
-from detectors.network_policy_detector import NetworkPolicyDetector
+from detectors import ALL_DETECTORS, run_all_detectors
 from detectors.cni_detector import CNIDetector
-from detectors.service_mesh_detector import ServiceMeshDetector
+from detectors.dns_detector import DNSDetector
+from detectors.network_policy_detector import NetworkPolicyDetector
 from detectors.node_pressure_detector import NodePressureDetector
-from detectors.storage_detector import StorageDetector
+from detectors.quota_detector import QuotaDetector
+from detectors.rbac_detector import RBACDetector
 from detectors.rollout_detector import RolloutDetector
-from detectors import run_all_detectors, ALL_DETECTORS
-
+from detectors.service_mesh_detector import ServiceMeshDetector
+from detectors.storage_detector import StorageDetector
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
 
 def empty_cluster_state():
     """Return a fully empty cluster state for negative test cases."""
@@ -37,8 +36,14 @@ def empty_cluster_state():
     }
 
 
-def make_event(reason, message, namespace="default", involved_name="test-pod",
-               involved_kind="Pod", event_type="Warning"):
+def make_event(
+    reason,
+    message,
+    namespace="default",
+    involved_name="test-pod",
+    involved_kind="Pod",
+    event_type="Warning",
+):
     """Build a minimal K8s event dict."""
     return {
         "reason": reason,
@@ -50,8 +55,14 @@ def make_event(reason, message, namespace="default", involved_name="test-pod",
     }
 
 
-def make_node(name="node-1", ready=True, memory_pressure=False,
-              disk_pressure=False, pid_pressure=False, conditions=None):
+def make_node(
+    name="node-1",
+    ready=True,
+    memory_pressure=False,
+    disk_pressure=False,
+    pid_pressure=False,
+    conditions=None,
+):
     """Build a minimal node dict."""
     return {
         "name": name,
@@ -63,15 +74,25 @@ def make_node(name="node-1", ready=True, memory_pressure=False,
     }
 
 
-def make_deployment(name, namespace="default", available_false=False,
-                    progress_deadline_exceeded=False, desired=2,
-                    available=0, unavailable=2):
+def make_deployment(
+    name,
+    namespace="default",
+    available_false=False,
+    progress_deadline_exceeded=False,
+    desired=2,
+    available=0,
+    unavailable=2,
+):
     """Build a minimal deployment dict."""
     conditions = []
     if available_false:
-        conditions.append({"type": "Available", "status": "False", "reason": "MinimumReplicasUnavailable"})
+        conditions.append(
+            {"type": "Available", "status": "False", "reason": "MinimumReplicasUnavailable"}
+        )
     if progress_deadline_exceeded:
-        conditions.append({"type": "Progressing", "status": "False", "reason": "ProgressDeadlineExceeded"})
+        conditions.append(
+            {"type": "Progressing", "status": "False", "reason": "ProgressDeadlineExceeded"}
+        )
     return {
         "name": name,
         "namespace": namespace,
@@ -87,6 +108,7 @@ def make_deployment(name, namespace="default", available_false=False,
 # QuotaDetector
 # ---------------------------------------------------------------------------
 
+
 class TestQuotaDetector:
     """Tests for QuotaDetector."""
 
@@ -97,7 +119,7 @@ class TestQuotaDetector:
             make_event(
                 reason="FailedCreate",
                 message="exceeded quota: compute-resources, requested: requests.cpu=500m, "
-                        "used: requests.cpu=9500m, limited: requests.cpu=10000m",
+                "used: requests.cpu=9500m, limited: requests.cpu=10000m",
                 namespace="production",
             )
         ]
@@ -137,6 +159,7 @@ class TestQuotaDetector:
 # ---------------------------------------------------------------------------
 # DNSDetector
 # ---------------------------------------------------------------------------
+
 
 class TestDNSDetector:
     """Tests for DNSDetector."""
@@ -195,6 +218,7 @@ class TestDNSDetector:
 # RBACDetector
 # ---------------------------------------------------------------------------
 
+
 class TestRBACDetector:
     """Tests for RBACDetector."""
 
@@ -229,9 +253,7 @@ class TestRBACDetector:
     def test_no_detection_clean_events(self):
         """Should not fire on normal events."""
         state = empty_cluster_state()
-        state["events"] = [
-            make_event(reason="Scheduled", message="Successfully assigned pod")
-        ]
+        state["events"] = [make_event(reason="Scheduled", message="Successfully assigned pod")]
         detector = RBACDetector()
         results = detector.detect(state)
         assert results == []
@@ -240,6 +262,7 @@ class TestRBACDetector:
 # ---------------------------------------------------------------------------
 # NetworkPolicyDetector
 # ---------------------------------------------------------------------------
+
 
 class TestNetworkPolicyDetector:
     """Tests for NetworkPolicyDetector."""
@@ -265,9 +288,7 @@ class TestNetworkPolicyDetector:
                 "ERROR connection timed out to backend",
             ]
         }
-        state["network_policies"] = [
-            {"name": "deny-all", "namespace": "production"}
-        ]
+        state["network_policies"] = [{"name": "deny-all", "namespace": "production"}]
         detector = NetworkPolicyDetector()
         results = detector.detect(state)
         assert len(results) >= 1
@@ -287,6 +308,7 @@ class TestNetworkPolicyDetector:
 # ---------------------------------------------------------------------------
 # CNIDetector
 # ---------------------------------------------------------------------------
+
 
 class TestCNIDetector:
     """Tests for CNIDetector."""
@@ -338,6 +360,7 @@ class TestCNIDetector:
 # ServiceMeshDetector
 # ---------------------------------------------------------------------------
 
+
 class TestServiceMeshDetector:
     """Tests for ServiceMeshDetector."""
 
@@ -386,9 +409,7 @@ class TestServiceMeshDetector:
     def test_no_detection_clean_state(self):
         """Should not fire on clean pod logs."""
         state = empty_cluster_state()
-        state["recent_logs"] = {
-            "default/app-abc/app": ["INFO: Serving request successfully"]
-        }
+        state["recent_logs"] = {"default/app-abc/app": ["INFO: Serving request successfully"]}
         detector = ServiceMeshDetector()
         results = detector.detect(state)
         assert results == []
@@ -397,6 +418,7 @@ class TestServiceMeshDetector:
 # ---------------------------------------------------------------------------
 # NodePressureDetector
 # ---------------------------------------------------------------------------
+
 
 class TestNodePressureDetector:
     """Tests for NodePressureDetector."""
@@ -435,9 +457,7 @@ class TestNodePressureDetector:
         state["nodes"] = [
             make_node(
                 name="node-4",
-                conditions=[
-                    {"type": "PIDPressure", "status": "True", "reason": "PIDPressure"}
-                ],
+                conditions=[{"type": "PIDPressure", "status": "True", "reason": "PIDPressure"}],
             )
         ]
         detector = NodePressureDetector()
@@ -457,6 +477,7 @@ class TestNodePressureDetector:
 # ---------------------------------------------------------------------------
 # StorageDetector
 # ---------------------------------------------------------------------------
+
 
 class TestStorageDetector:
     """Tests for StorageDetector."""
@@ -515,12 +536,8 @@ class TestStorageDetector:
     def test_no_detection_clean_state(self):
         """Should not fire when no storage errors are present."""
         state = empty_cluster_state()
-        state["events"] = [
-            make_event(reason="Pulled", message="Successfully pulled image")
-        ]
-        state["pvcs"] = [
-            {"name": "data-pvc", "namespace": "prod", "phase": "Bound"}
-        ]
+        state["events"] = [make_event(reason="Pulled", message="Successfully pulled image")]
+        state["pvcs"] = [{"name": "data-pvc", "namespace": "prod", "phase": "Bound"}]
         detector = StorageDetector()
         results = detector.detect(state)
         assert results == []
@@ -529,6 +546,7 @@ class TestStorageDetector:
 # ---------------------------------------------------------------------------
 # RolloutDetector
 # ---------------------------------------------------------------------------
+
 
 class TestRolloutDetector:
     """Tests for RolloutDetector."""
@@ -610,6 +628,7 @@ class TestRolloutDetector:
 # ---------------------------------------------------------------------------
 # All detectors — run_all_detectors integration test
 # ---------------------------------------------------------------------------
+
 
 class TestRunAllDetectors:
     """Tests for the run_all_detectors() function and ALL_DETECTORS list."""

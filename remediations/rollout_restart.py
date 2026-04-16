@@ -1,4 +1,5 @@
 """Remediation: rolling restart of a deployment."""
+
 from __future__ import annotations
 
 import logging
@@ -45,8 +46,9 @@ class RolloutRestartRemediation(BaseRemediation):
         start = time.time()
         try:
             from providers.kubernetes import get_k8s_client
+
             client = get_k8s_client()
-            result = client.rollout_restart(namespace=namespace, deployment=workload)
+            client.rollout_restart(namespace=namespace, deployment=workload)
             duration = time.time() - start
             logger.info("Rollout restart triggered: %s/%s", namespace, workload)
             return RemediationResult(

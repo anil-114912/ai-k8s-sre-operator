@@ -1,8 +1,9 @@
 """Detector for Service selector mismatches and missing endpoints."""
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List
 
 from detectors.base import BaseDetector, DetectionResult
 from models.incident import Evidence

@@ -1,4 +1,5 @@
 """Detector for DNS failures in Kubernetes clusters."""
+
 from __future__ import annotations
 
 import logging
@@ -72,7 +73,9 @@ class DNSDetector(BaseDetector):
                 state = cs.get("state", {})
                 waiting = state.get("waiting", {})
                 if phase != "Running" or waiting.get("reason") in (
-                    "CrashLoopBackOff", "ErrImagePull", "ImagePullBackOff"
+                    "CrashLoopBackOff",
+                    "ErrImagePull",
+                    "ImagePullBackOff",
                 ):
                     coredns_unhealthy.append(pod.get("name", "coredns"))
 

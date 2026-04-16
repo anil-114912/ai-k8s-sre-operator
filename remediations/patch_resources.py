@@ -1,4 +1,5 @@
 """Remediation: patch resource limits/requests on a deployment."""
+
 from __future__ import annotations
 
 import json
@@ -71,12 +72,16 @@ class PatchResourcesRemediation(BaseRemediation):
         start = time.time()
         try:
             from providers.kubernetes import get_k8s_client
+
             client = get_k8s_client()
             client.patch_deployment(namespace=namespace, deployment=workload, patch=patch)
             duration = time.time() - start
             logger.info(
                 "Resource limits patched: %s/%s memory=%s cpu=%s",
-                namespace, workload, memory_limit, cpu_limit,
+                namespace,
+                workload,
+                memory_limit,
+                cpu_limit,
             )
             return RemediationResult(
                 plan_id=plan_id,

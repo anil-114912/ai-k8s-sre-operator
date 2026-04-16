@@ -1,4 +1,5 @@
 """Remediation: restart a single pod by deleting it."""
+
 from __future__ import annotations
 
 import logging
@@ -45,8 +46,9 @@ class RestartPodRemediation(BaseRemediation):
         start = time.time()
         try:
             from providers.kubernetes import get_k8s_client
+
             client = get_k8s_client()
-            result = client.delete_pod(namespace=namespace, pod_name=pod_name)
+            client.delete_pod(namespace=namespace, pod_name=pod_name)
             duration = time.time() - start
             logger.info("Pod deleted: %s/%s", namespace, pod_name)
             return RemediationResult(

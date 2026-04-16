@@ -1,4 +1,5 @@
 """Retrieval-augmented context builder combining KB matches and past incident memory."""
+
 from __future__ import annotations
 
 import logging
@@ -192,15 +193,11 @@ class ContextBuilder:
 
         lines = ["=== KNOWLEDGE BASE MATCHES ==="]
         for pattern in kb_matches:
-            lines.append(
-                f"\n[Pattern {pattern.id} (score={pattern.score:.2f})] {pattern.title}"
-            )
+            lines.append(f"\n[Pattern {pattern.id} (score={pattern.score:.2f})] {pattern.title}")
             lines.append(f"Root cause: {pattern.root_cause}")
             steps = pattern.remediation_steps[:3]
             if steps:
-                step_str = " ".join(
-                    f"[{i+1}] {s}" for i, s in enumerate(steps)
-                )
+                step_str = " ".join(f"[{i + 1}] {s}" for i, s in enumerate(steps))
                 lines.append(f"Remediation: {step_str}")
             if pattern.safety_level:
                 lines.append(f"Safety level: {pattern.safety_level}")

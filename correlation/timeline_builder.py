@@ -1,8 +1,8 @@
 """Builds chronological timelines from K8s events, rollouts, and logs."""
+
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ class TimelineBuilder:
         timeline: List[TimelineEvent] = []
 
         # Process K8s events
-        for ev in (events or []):
+        for ev in events or []:
             ts = ev.get("lastTimestamp") or ev.get("firstTimestamp") or ""
             if not ts:
                 continue
@@ -93,7 +93,7 @@ class TimelineBuilder:
             )
 
         # Process recent changes (deployments, rollouts, config changes)
-        for change in (recent_changes or []):
+        for change in recent_changes or []:
             ts = change.get("timestamp", change.get("time", ""))
             if not ts:
                 continue
@@ -113,12 +113,14 @@ class TimelineBuilder:
             )
 
         # Process log lines (extract timestamp prefix)
-        for line in (log_entries or []):
+        for line in log_entries or []:
             ts = self._extract_log_timestamp(line)
             if not ts:
                 continue
 
-            severity = "error" if any(w in line.upper() for w in ("ERROR", "FATAL", "PANIC")) else "info"
+            severity = (
+                "error" if any(w in line.upper() for w in ("ERROR", "FATAL", "PANIC")) else "info"
+            )
 
             timeline.append(
                 TimelineEvent(
@@ -163,7 +165,5 @@ class TimelineBuilder:
         lines = ["=== Incident Timeline (chronological) ==="]
         for ev in timeline[-max_entries:]:
             severity_marker = "⚠️" if ev.severity == "error" else "ℹ️"
-            lines.append(
-                f"{ev.timestamp} [{ev.source}] {severity_marker} {ev.message}"
-            )
+            lines.append(f"{ev.timestamp} [{ev.source}] {severity_marker} {ev.message}")
         return "\n".join(lines)

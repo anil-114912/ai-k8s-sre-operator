@@ -1,4 +1,5 @@
 """LLM client supporting Anthropic, OpenAI, and rule-based demo fallback."""
+
 from __future__ import annotations
 
 import json
@@ -331,7 +332,9 @@ class LLMClient:
 
         logger.info(
             "LLMClient initialised: provider=%s demo_mode=%s has_anthropic=%s",
-            self.provider, self.demo_mode, self._anthropic_client is not None,
+            self.provider,
+            self.demo_mode,
+            self._anthropic_client is not None,
         )
 
     def _init_provider(self) -> None:
@@ -343,6 +346,7 @@ class LLMClient:
         if self.provider == "anthropic" and anthropic_key:
             try:
                 import anthropic
+
                 self._anthropic_client = anthropic.Anthropic(api_key=anthropic_key)
                 logger.info("Anthropic client initialised (model=%s)", DEFAULT_ANTHROPIC_MODEL)
             except ImportError:
@@ -351,6 +355,7 @@ class LLMClient:
         elif self.provider == "openai" and openai_key:
             try:
                 import openai
+
                 self._openai_client = openai.OpenAI(api_key=openai_key)
                 logger.info("OpenAI client initialised (model=%s)", DEFAULT_OPENAI_MODEL)
             except ImportError:
@@ -471,7 +476,11 @@ class LLMClient:
             return "ImagePullBackOff"
         elif "podpending" in text_lower or "pod_pending" in text_lower or "pending" in text_lower:
             return "PodPending"
-        elif "pvcfailure" in text_lower or "pvc" in text_lower or "persistentvolumeclaim" in text_lower:
+        elif (
+            "pvcfailure" in text_lower
+            or "pvc" in text_lower
+            or "persistentvolumeclaim" in text_lower
+        ):
             return "PVCFailure"
         elif "servicemismatch" in text_lower or "service_mismatch" in text_lower:
             return "ServiceMismatch"
@@ -527,12 +536,15 @@ class LLMClient:
         # OOMKilled: include patch_limits step
         if incident_type == "OOMKilled":
             patch_cmd = (
-                "kubectl patch deployment {wl} -n {ns} -p "
-                "'{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"{wl}\","
-                "\"resources\":{\"limits\":{\"memory\":\"512Mi\"}}}]}}}}'"
-            ).format(wl=workload, ns=namespace)
+                f"kubectl patch deployment {workload} -n {namespace} -p "
+                f'\'{{"spec":{{"template":{{"spec":{{"containers":'
+                f'[{{"name":"{workload}","resources":{{"limits":{{"memory":"512Mi"}}}}}}]'
+                f"}}}}}}}}}}'"
+            )
             resp = {
-                "summary": "Increase memory limits and restart {}/{} to prevent OOMKill".format(namespace, workload),
+                "summary": "Increase memory limits and restart {}/{} to prevent OOMKill".format(
+                    namespace, workload
+                ),
                 "steps": [
                     {
                         "order": 1,
@@ -546,7 +558,9 @@ class LLMClient:
                     {
                         "order": 2,
                         "action": "rollout_restart",
-                        "command": "kubectl rollout restart deployment/{} -n {}".format(workload, namespace),
+                        "command": "kubectl rollout restart deployment/{} -n {}".format(
+                            workload, namespace
+                        ),
                         "description": "Rolling restart to apply new memory limits",
                         "safety_level": "auto_fix",
                         "reversible": True,
@@ -556,7 +570,9 @@ class LLMClient:
                 "overall_safety_level": "approval_required",
                 "requires_approval": True,
                 "estimated_downtime_secs": 0,
-                "rollback_plan": "kubectl rollout undo deployment/{} -n {}".format(workload, namespace),
+                "rollback_plan": "kubectl rollout undo deployment/{} -n {}".format(
+                    workload, namespace
+                ),
             }
             return json.dumps(resp, indent=2)
 
@@ -566,9 +582,7 @@ class LLMClient:
         for step in resp.get("steps", []):
             step = dict(step)
             if step.get("command"):
-                step["command"] = step["command"].format(
-                    workload=workload, namespace=namespace
-                )
+                step["command"] = step["command"].format(workload=workload, namespace=namespace)
             steps.append(step)
         resp["steps"] = steps
         return json.dumps(resp, indent=2)

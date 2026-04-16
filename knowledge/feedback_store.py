@@ -1,4 +1,5 @@
 """Remediation outcome feedback tracker with DB-backed structured feedback."""
+
 from __future__ import annotations
 
 import logging
@@ -108,7 +109,9 @@ class FeedbackStore:
 
         logger.info(
             "Structured feedback submitted: incident=%s correct_rca=%s fix_worked=%s",
-            incident_id, correct_root_cause, fix_worked,
+            incident_id,
+            correct_root_cause,
+            fix_worked,
         )
         return record
 
@@ -200,8 +203,7 @@ class FeedbackStore:
         )
         feedback_total = with_positive_feedback + with_negative_feedback
         fix_success_pct = (
-            with_positive_feedback / feedback_total * 100
-            if feedback_total > 0 else 0.0
+            with_positive_feedback / feedback_total * 100 if feedback_total > 0 else 0.0
         )
 
         # RCA accuracy from structured_feedback table (persisted)

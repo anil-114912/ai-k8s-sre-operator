@@ -1,8 +1,9 @@
 """Prometheus metrics collector for workload resource usage."""
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from providers.prometheus import PrometheusClient
 

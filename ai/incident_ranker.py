@@ -1,13 +1,14 @@
 """Incident ranker — sorts incidents by severity, urgency, and business impact."""
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from ai.llm import get_llm_client
 from ai.prompts import RANKING_SYSTEM_PROMPT, RANKING_USER_TEMPLATE
-from models.incident import Incident, Severity
+from models.incident import Incident
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ class IncidentRanker:
         Returns:
             Sorted list of incidents.
         """
+
         def score(incident: Incident) -> float:
             """Compute urgency score for a single incident."""
             severity_score = SEVERITY_SCORES.get(incident.severity.value, 0.5)

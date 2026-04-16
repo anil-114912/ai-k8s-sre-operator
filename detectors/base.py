@@ -1,4 +1,5 @@
 """Base detector abstraction for all incident detectors."""
+
 from __future__ import annotations
 
 import logging

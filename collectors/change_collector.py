@@ -1,4 +1,5 @@
 """Recent rollout/deployment change collector."""
+
 from __future__ import annotations
 
 import logging
@@ -47,13 +48,15 @@ class ChangeCollector:
                 except ValueError:
                     pass
 
-            changes.append({
-                "type": "K8sEvent",
-                "message": ev.get("message", ""),
-                "timestamp": ts or "",
-                "resource": ev.get("involvedObject", {}).get("name", ""),
-                "namespace": ev.get("namespace", ""),
-            })
+            changes.append(
+                {
+                    "type": "K8sEvent",
+                    "message": ev.get("message", ""),
+                    "timestamp": ts or "",
+                    "resource": ev.get("involvedObject", {}).get("name", ""),
+                    "namespace": ev.get("namespace", ""),
+                }
+            )
 
         # Include any annotated recent changes from raw_signals
         # This allows incident JSON examples to inject change timeline

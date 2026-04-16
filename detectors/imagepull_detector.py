@@ -1,4 +1,5 @@
 """Detector for ImagePullBackOff and ErrImagePull incidents."""
+
 from __future__ import annotations
 
 import logging
@@ -33,7 +34,9 @@ class ImagePullDetector(BaseDetector):
         for pod in pods:
             pod_name = pod.get("name", "")
             namespace = pod.get("namespace", "default")
-            workload = pod.get("workload", pod_name.rsplit("-", 2)[0] if "-" in pod_name else pod_name)
+            workload = pod.get(
+                "workload", pod_name.rsplit("-", 2)[0] if "-" in pod_name else pod_name
+            )
 
             container_statuses = pod.get("container_statuses", [])
             containers = pod.get("containers", [])

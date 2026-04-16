@@ -1,4 +1,5 @@
 """Policy guardrails — safety validation before executing any remediation action."""
+
 from __future__ import annotations
 
 import logging
@@ -44,7 +45,9 @@ class PolicyGuardrails:
         self.ns_policy = namespace_policy or NamespacePolicy()
         self.allowlist = action_allowlist or ActionAllowlist()
         self.dry_run = dry_run if dry_run is not None else DRY_RUN
-        self.auto_fix_enabled = auto_fix_enabled if auto_fix_enabled is not None else AUTO_FIX_ENABLED
+        self.auto_fix_enabled = (
+            auto_fix_enabled if auto_fix_enabled is not None else AUTO_FIX_ENABLED
+        )
         self.cooldown_secs = cooldown_secs if cooldown_secs is not None else COOLDOWN_SECS
 
     def validate(
@@ -78,9 +81,7 @@ class PolicyGuardrails:
         # 3. Safety level check
         if not self.auto_fix_enabled and step.safety_level == SafetyLevel.auto_fix:
             # Auto-fix is disabled globally — downgrade to approval_required
-            logger.info(
-                "Auto-fix disabled: action '%s' requires explicit approval", step.action
-            )
+            logger.info("Auto-fix disabled: action '%s' requires explicit approval", step.action)
 
         if step.safety_level == SafetyLevel.suggest_only:
             reason = (
@@ -92,9 +93,7 @@ class PolicyGuardrails:
 
         if step.safety_level == SafetyLevel.approval_required:
             # Will be caught at the plan level — but log it here too
-            logger.info(
-                "Guardrail: action '%s' requires approval before execution", step.action
-            )
+            logger.info("Guardrail: action '%s' requires approval before execution", step.action)
 
         # 4. Cooldown check
         cooldown_ok, cooldown_reason = self._check_cooldown(namespace, workload)

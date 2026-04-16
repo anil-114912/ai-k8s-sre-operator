@@ -1,4 +1,5 @@
 """TF-IDF and optional sentence-transformer embeddings for incident similarity search."""
+
 from __future__ import annotations
 
 import json
@@ -19,6 +20,7 @@ _sentence_transformer_available = False
 
 try:
     from sentence_transformers import SentenceTransformer as _ST  # type: ignore
+
     _sentence_transformer_available = True
     logger.debug("sentence-transformers is available")
 except ImportError:
@@ -84,7 +86,9 @@ class TFIDFEmbedder:
         # Build vocabulary from IDF keys
         self._vocabulary = {term: i for i, term in enumerate(sorted(self._idf.keys()))}
         self._fitted = True
-        logger.debug("TFIDFEmbedder fitted on %d documents, vocab size=%d", n, len(self._vocabulary))
+        logger.debug(
+            "TFIDFEmbedder fitted on %d documents, vocab size=%d", n, len(self._vocabulary)
+        )
 
     def transform(self, text: str) -> List[float]:
         """Transform text into a TF-IDF vector.
@@ -184,6 +188,7 @@ class TFIDFEmbedder:
 # IncidentEmbedder — enhanced embedder with sentence-transformers fallback
 # ---------------------------------------------------------------------------
 
+
 class IncidentEmbedder:
     """Embeds incident descriptions using sentence-transformers if available, else TF-IDF."""
 
@@ -199,7 +204,9 @@ class IncidentEmbedder:
             try:
                 self._st_model = _ST(self._ST_MODEL_NAME)  # type: ignore
                 self._use_st = True
-                logger.info("IncidentEmbedder: using sentence-transformers (%s)", self._ST_MODEL_NAME)
+                logger.info(
+                    "IncidentEmbedder: using sentence-transformers (%s)", self._ST_MODEL_NAME
+                )
             except Exception as exc:
                 logger.warning("Failed to load sentence-transformers model: %s — using TF-IDF", exc)
         else:
@@ -219,7 +226,9 @@ class IncidentEmbedder:
                 vec = self._st_model.encode(text, convert_to_numpy=True)
                 return [float(v) for v in vec]
             except Exception as exc:
-                logger.warning("sentence-transformers encode failed: %s — falling back to TF-IDF", exc)
+                logger.warning(
+                    "sentence-transformers encode failed: %s — falling back to TF-IDF", exc
+                )
         return self._tfidf.transform(text)
 
     def refit(self, texts: List[str]) -> None:

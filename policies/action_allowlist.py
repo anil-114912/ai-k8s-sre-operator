@@ -1,11 +1,12 @@
 """Action allowlist — which remediation actions are permitted."""
+
 from __future__ import annotations
 
 import logging
 from typing import List, Set
 
-from policies.safety_levels import SAFETY_RULES
 from models.remediation import SafetyLevel
+from policies.safety_levels import SAFETY_RULES
 
 logger = logging.getLogger(__name__)
 

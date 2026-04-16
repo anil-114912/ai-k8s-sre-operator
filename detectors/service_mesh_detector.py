@@ -1,4 +1,5 @@
 """Detector for service mesh failures (Istio/Linkerd)."""
+
 from __future__ import annotations
 
 import logging
@@ -58,7 +59,7 @@ class ServiceMeshDetector(BaseDetector):
         results: List[DetectionResult] = []
         events = cluster_state.get("events", [])
         recent_logs = cluster_state.get("recent_logs", {})
-        pods = cluster_state.get("pods", [])
+        cluster_state.get("pods", [])
 
         seen: Dict[str, bool] = {}
 
@@ -70,9 +71,10 @@ class ServiceMeshDetector(BaseDetector):
             involved = event.get("involvedObject", {})
             pod_name = involved.get("name", "")
 
-            is_mesh_event = any(p in message_lower for p in [
-                "sidecar", "istio", "linkerd", "envoy", "mtls", "circuit"
-            ])
+            is_mesh_event = any(
+                p in message_lower
+                for p in ["sidecar", "istio", "linkerd", "envoy", "mtls", "circuit"]
+            )
             if not is_mesh_event:
                 continue
 
@@ -142,7 +144,8 @@ class ServiceMeshDetector(BaseDetector):
                 evidence.append(
                     self._make_evidence(
                         source="pod_logs",
-                        content=f"Circuit breaker events in {log_key}:\n" + "\n".join(circuit_breaker_hits[:3]),
+                        content=f"Circuit breaker events in {log_key}:\n"
+                        + "\n".join(circuit_breaker_hits[:3]),
                         relevance=1.0,
                     )
                 )
@@ -166,7 +169,11 @@ class ServiceMeshDetector(BaseDetector):
                     )
                 )
 
-            issue_type = "circuit_breaker" if circuit_breaker_hits else ("mtls_mismatch" if mtls_errors else "upstream_error")
+            issue_type = (
+                "circuit_breaker"
+                if circuit_breaker_hits
+                else ("mtls_mismatch" if mtls_errors else "upstream_error")
+            )
 
             results.append(
                 DetectionResult(

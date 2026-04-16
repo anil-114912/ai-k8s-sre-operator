@@ -1,4 +1,5 @@
 """Signal correlator — classifies detection signals as root cause, contributing factor, or symptom."""
+
 from __future__ import annotations
 
 import logging
@@ -41,16 +42,26 @@ CAUSE_EFFECT_RULES: Dict[str, Dict[str, str]] = {
 
 SIGNAL_KEYWORDS = {
     "missing_secret": [
-        "secret", "not found", "secretKeyRef", "secretRef", "no such file",
-        "failed to load config", "environment variable",
+        "secret",
+        "not found",
+        "secretKeyRef",
+        "secretRef",
+        "no such file",
+        "failed to load config",
+        "environment variable",
     ],
     "missing_configmap": [
-        "configmap", "configmapkeyref", "config not found",
+        "configmap",
+        "configmapkeyref",
+        "config not found",
     ],
     "oom": ["oomkilled", "out of memory", "memory limit", "exit code 137"],
     "image_issue": [
-        "imagepullbackoff", "errimagepull", "not found in registry",
-        "manifest unknown", "invalid reference format",
+        "imagepullbackoff",
+        "errimagepull",
+        "not found in registry",
+        "manifest unknown",
+        "invalid reference format",
     ],
     "probe_failure": ["readiness probe", "liveness probe", "probe failed"],
     "resource_quota": ["exceeded quota", "insufficient", "resource quota"],
@@ -171,9 +182,11 @@ class SignalCorrelator:
             if result.root_causes:
                 rc_types = [d.incident_type for d in result.root_causes]
                 sym_types = [d.incident_type for d in result.symptoms]
-                factors = list(detected_hidden.intersection({
-                    "missing_secret", "missing_configmap", "rollout", "resource_quota"
-                }))
+                factors = list(
+                    detected_hidden.intersection(
+                        {"missing_secret", "missing_configmap", "rollout", "resource_quota"}
+                    )
+                )
                 parts = [f"Root cause(s): {', '.join(rc_types)}"]
                 if sym_types:
                     parts.append(f"symptoms: {', '.join(sym_types)}")

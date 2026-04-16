@@ -1,16 +1,16 @@
 """Tests for AI RCA engine, remediation engine, and LLM client."""
+
 from __future__ import annotations
 
 import json
 import os
-import pytest
 
 os.environ["DEMO_MODE"] = "1"
 
 from ai.llm import LLMClient
 from ai.rca_engine import RCAEngine
 from ai.remediation_engine import RemediationEngine
-from models.incident import Incident, IncidentType, Severity, IncidentStatus
+from models.incident import Incident, IncidentStatus, IncidentType, Severity
 from models.remediation import SafetyLevel
 
 
@@ -169,7 +169,11 @@ class TestRemediationEngine:
         engine = RemediationEngine()
         incident = make_test_incident()
         plan = engine.generate_plan(incident)
-        valid_levels = {SafetyLevel.auto_fix, SafetyLevel.approval_required, SafetyLevel.suggest_only}
+        valid_levels = {
+            SafetyLevel.auto_fix,
+            SafetyLevel.approval_required,
+            SafetyLevel.suggest_only,
+        }
         for step in plan.steps:
             assert step.safety_level in valid_levels
 
@@ -213,4 +217,7 @@ class TestRemediationEngine:
         if SafetyLevel.suggest_only in step_levels:
             assert plan.overall_safety_level == SafetyLevel.suggest_only
         elif SafetyLevel.approval_required in step_levels:
-            assert plan.overall_safety_level in (SafetyLevel.approval_required, SafetyLevel.suggest_only)
+            assert plan.overall_safety_level in (
+                SafetyLevel.approval_required,
+                SafetyLevel.suggest_only,
+            )

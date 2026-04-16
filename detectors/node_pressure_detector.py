@@ -1,4 +1,5 @@
 """Detector for node pressure conditions (Memory, Disk, PID pressure)."""
+
 from __future__ import annotations
 
 import logging
@@ -50,7 +51,10 @@ class NodePressureDetector(BaseDetector):
             for cond in conditions:
                 cond_type = cond.get("type", "")
                 cond_status = cond.get("status", "False")
-                if cond_type in ("MemoryPressure", "DiskPressure", "PIDPressure") and cond_status == "True":
+                if (
+                    cond_type in ("MemoryPressure", "DiskPressure", "PIDPressure")
+                    and cond_status == "True"
+                ):
                     if cond_type not in pressure_conditions:
                         pressure_conditions.append(cond_type)
                 if cond_type == "Ready" and cond_status != "True":
@@ -61,7 +65,8 @@ class NodePressureDetector(BaseDetector):
 
             # Gather relevant events for this node
             node_events = [
-                e for e in events
+                e
+                for e in events
                 if e.get("involvedObject", {}).get("name") == node_name
                 or e.get("name") == node_name
             ]
@@ -73,7 +78,7 @@ class NodePressureDetector(BaseDetector):
                     self._make_evidence(
                         source="detector",
                         content=f"Node '{node_name}' has active pressure conditions: {', '.join(pressure_conditions)}. "
-                                "Pods may be evicted or fail to schedule on this node.",
+                        "Pods may be evicted or fail to schedule on this node.",
                         relevance=1.0,
                     )
                 )
@@ -97,7 +102,7 @@ class NodePressureDetector(BaseDetector):
                 evidence.append(
                     self._make_evidence(
                         source="k8s_events",
-                        content=f"Node event: reason={event.get('reason','?')}, message={event.get('message','?')}",
+                        content=f"Node event: reason={event.get('reason', '?')}, message={event.get('message', '?')}",
                         relevance=0.8,
                     )
                 )
@@ -133,7 +138,9 @@ class NodePressureDetector(BaseDetector):
             )
             logger.info(
                 "NodePressure detected: node=%s conditions=%s ready=%s",
-                node_name, pressure_conditions, ready,
+                node_name,
+                pressure_conditions,
+                ready,
             )
 
         return results

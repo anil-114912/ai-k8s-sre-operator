@@ -1,13 +1,14 @@
 """Tests for all FastAPI endpoints."""
+
 from __future__ import annotations
 
 import os
-import pytest
 
 os.environ["DEMO_MODE"] = "1"
 os.environ["DATABASE_URL"] = "sqlite:///./test_sre.db"
 
 from fastapi.testclient import TestClient
+
 from api.main import app
 
 client = TestClient(app)
@@ -151,9 +152,7 @@ class TestRemediationEndpoints:
             assert approve_resp.status_code == 200
 
         # Now execute
-        response = client.post(
-            f"/api/v1/incidents/{inc_id}/remediation/execute?dry_run=true"
-        )
+        response = client.post(f"/api/v1/incidents/{inc_id}/remediation/execute?dry_run=true")
         assert response.status_code == 200
         data = response.json()
         assert data["dry_run"] is True

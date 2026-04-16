@@ -1,18 +1,17 @@
 """Tests for remediation executors (all in dry-run mode)."""
+
 from __future__ import annotations
 
 import os
-import pytest
 
 os.environ["DEMO_MODE"] = "1"
 
-from remediations.restart_pod import RestartPodRemediation
-from remediations.rollout_restart import RolloutRestartRemediation
-from remediations.rollback_deployment import RollbackDeploymentRemediation
-from remediations.scale_deployment import ScaleDeploymentRemediation
 from remediations.patch_resources import PatchResourcesRemediation
 from remediations.rerun_job import RerunJobRemediation
-
+from remediations.restart_pod import RestartPodRemediation
+from remediations.rollback_deployment import RollbackDeploymentRemediation
+from remediations.rollout_restart import RolloutRestartRemediation
+from remediations.scale_deployment import ScaleDeploymentRemediation
 
 INCIDENT_ID = "test-incident-001"
 PLAN_ID = "test-plan-001"

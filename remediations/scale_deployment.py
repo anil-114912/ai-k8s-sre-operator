@@ -1,4 +1,5 @@
 """Remediation: scale a deployment up or down."""
+
 from __future__ import annotations
 
 import logging
@@ -46,6 +47,7 @@ class ScaleDeploymentRemediation(BaseRemediation):
         start = time.time()
         try:
             from providers.kubernetes import get_k8s_client
+
             client = get_k8s_client()
             client.scale_deployment(namespace=namespace, deployment=workload, replicas=replicas)
             duration = time.time() - start

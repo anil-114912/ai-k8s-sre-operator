@@ -1,4 +1,5 @@
 """Per-namespace allowlist and denylist policies."""
+
 from __future__ import annotations
 
 import logging
@@ -9,14 +10,10 @@ logger = logging.getLogger(__name__)
 
 # Load from environment for runtime configuration
 _RAW_DENIED = os.getenv("DENIED_NAMESPACES", "kube-system,kube-public")
-DEFAULT_DENIED_NAMESPACES: List[str] = [
-    ns.strip() for ns in _RAW_DENIED.split(",") if ns.strip()
-]
+DEFAULT_DENIED_NAMESPACES: List[str] = [ns.strip() for ns in _RAW_DENIED.split(",") if ns.strip()]
 
 _RAW_ALLOWED = os.getenv("ALLOWED_NAMESPACES", "")
-DEFAULT_ALLOWED_NAMESPACES: List[str] = [
-    ns.strip() for ns in _RAW_ALLOWED.split(",") if ns.strip()
-]
+DEFAULT_ALLOWED_NAMESPACES: List[str] = [ns.strip() for ns in _RAW_ALLOWED.split(",") if ns.strip()]
 
 
 class NamespacePolicy:
@@ -59,9 +56,7 @@ class NamespacePolicy:
             return False
 
         if self.allowed and namespace not in self.allowed:
-            logger.warning(
-                "Namespace '%s' not in allowed list: %s", namespace, self.allowed
-            )
+            logger.warning("Namespace '%s' not in allowed list: %s", namespace, self.allowed)
             return False
 
         return True

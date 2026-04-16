@@ -1,4 +1,5 @@
 """Detector for RBAC authorization denials in Kubernetes."""
+
 from __future__ import annotations
 
 import logging
@@ -69,7 +70,9 @@ class RBACDetector(BaseDetector):
             service_account = sa_match.group(1) if sa_match else "unknown"
 
             # Extract denied verb/resource
-            verb_match = re.search(r'cannot\s+(\w+)\s+resource\s+"?([^\s"]+)"?', message, re.IGNORECASE)
+            verb_match = re.search(
+                r'cannot\s+(\w+)\s+resource\s+"?([^\s"]+)"?', message, re.IGNORECASE
+            )
             denied_verb = verb_match.group(1) if verb_match else "unknown"
             denied_resource = verb_match.group(2) if verb_match else "unknown"
 
@@ -108,7 +111,10 @@ class RBACDetector(BaseDetector):
             )
             logger.info(
                 "RBACDenied detected: namespace=%s sa=%s verb=%s resource=%s",
-                namespace, service_account, denied_verb, denied_resource,
+                namespace,
+                service_account,
+                denied_verb,
+                denied_resource,
             )
 
         # Check logs for RBAC patterns

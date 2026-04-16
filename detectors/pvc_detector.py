@@ -1,4 +1,5 @@
 """Detector for PersistentVolumeClaim binding failures."""
+
 from __future__ import annotations
 
 import logging
@@ -66,7 +67,10 @@ class PVCDetector(BaseDetector):
                 # Related events
                 for ev in events:
                     involved = ev.get("involvedObject", {})
-                    if involved.get("name") == pvc_name and involved.get("kind") == "PersistentVolumeClaim":
+                    if (
+                        involved.get("name") == pvc_name
+                        and involved.get("kind") == "PersistentVolumeClaim"
+                    ):
                         evidence.append(
                             self._make_evidence(
                                 source="k8s_events",

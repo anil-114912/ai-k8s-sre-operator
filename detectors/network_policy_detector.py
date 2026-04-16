@@ -1,4 +1,5 @@
 """Detector for NetworkPolicy blocks causing connectivity failures."""
+
 from __future__ import annotations
 
 import logging
@@ -40,7 +41,7 @@ class NetworkPolicyDetector(BaseDetector):
         results: List[DetectionResult] = []
         recent_logs = cluster_state.get("recent_logs", {})
         network_policies = cluster_state.get("network_policies", [])
-        pods = cluster_state.get("pods", [])
+        cluster_state.get("pods", [])
 
         # Check pod logs for connection timeout patterns
         for log_key, log_lines in recent_logs.items():
@@ -67,7 +68,8 @@ class NetworkPolicyDetector(BaseDetector):
             evidence: List[Evidence] = [
                 self._make_evidence(
                     source="pod_logs",
-                    content=f"Network connection failures in {log_key}:\n" + "\n".join(matched_lines[:5]),
+                    content=f"Network connection failures in {log_key}:\n"
+                    + "\n".join(matched_lines[:5]),
                     relevance=1.0,
                 ),
             ]
@@ -78,7 +80,7 @@ class NetworkPolicyDetector(BaseDetector):
                     self._make_evidence(
                         source="detector",
                         content=f"NetworkPolicy objects present in namespace '{namespace}': {', '.join(policy_names)}. "
-                                "A policy may be blocking traffic to/from this pod.",
+                        "A policy may be blocking traffic to/from this pod.",
                         relevance=0.9,
                     )
                 )
@@ -88,7 +90,8 @@ class NetworkPolicyDetector(BaseDetector):
                     detected=True,
                     incident_type="NetworkPolicyBlock",
                     severity=severity,
-                    reason=f"Network connectivity failures in {log_key}" + (" (NetworkPolicies present)" if has_policies else ""),
+                    reason=f"Network connectivity failures in {log_key}"
+                    + (" (NetworkPolicies present)" if has_policies else ""),
                     evidence=evidence,
                     affected_resource=f"{namespace}/{pod_name}",
                     namespace=namespace,

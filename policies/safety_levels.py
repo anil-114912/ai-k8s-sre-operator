@@ -1,4 +1,5 @@
 """Safety level definitions and default policy configuration."""
+
 from __future__ import annotations
 
 from models.remediation import SafetyLevel

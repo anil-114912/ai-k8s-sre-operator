@@ -1,4 +1,5 @@
 """Detector for liveness and readiness probe failures."""
+
 from __future__ import annotations
 
 import logging
@@ -64,9 +65,7 @@ class ProbeFailureDetector(BaseDetector):
                 pod_name.rsplit("-", 2)[0] if "-" in pod_name else pod_name,
             )
 
-            probe_type = (
-                "Readiness" if is_readiness else ("Startup" if is_startup else "Liveness")
-            )
+            probe_type = "Readiness" if is_readiness else ("Startup" if is_startup else "Liveness")
 
             evidence: List[Evidence] = []
             evidence.append(
@@ -92,7 +91,9 @@ class ProbeFailureDetector(BaseDetector):
             containers = pod.get("containers", [])
             for c in containers:
                 probe_key = (
-                    "readinessProbe" if is_readiness else ("startupProbe" if is_startup else "livenessProbe")
+                    "readinessProbe"
+                    if is_readiness
+                    else ("startupProbe" if is_startup else "livenessProbe")
                 )
                 probe_spec = c.get(probe_key, {})
                 if probe_spec:
@@ -120,8 +121,6 @@ class ProbeFailureDetector(BaseDetector):
                     raw_signals={"probe_type": probe_type, "message": msg, "count": count},
                 )
             )
-            logger.info(
-                "Probe failure detected: pod=%s probe_type=%s", pod_name, probe_type
-            )
+            logger.info("Probe failure detected: pod=%s probe_type=%s", pod_name, probe_type)
 
         return results

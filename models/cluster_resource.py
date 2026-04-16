@@ -1,4 +1,5 @@
 """Pydantic models for Kubernetes cluster resources."""
+
 from __future__ import annotations
 
 from enum import Enum

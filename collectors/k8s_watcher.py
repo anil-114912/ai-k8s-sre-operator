@@ -1,4 +1,5 @@
 """Kubernetes watch loop — continuously polls cluster state and feeds detectors."""
+
 from __future__ import annotations
 
 import logging

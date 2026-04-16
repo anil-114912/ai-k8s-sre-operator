@@ -1,4 +1,5 @@
 """Detector for Ingress configuration failures and missing backends."""
+
 from __future__ import annotations
 
 import logging

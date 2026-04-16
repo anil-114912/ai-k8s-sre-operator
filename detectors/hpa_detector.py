@@ -1,4 +1,5 @@
 """Detector for HorizontalPodAutoscaler misconfigurations."""
+
 from __future__ import annotations
 
 import logging
@@ -38,7 +39,7 @@ class HPADetector(BaseDetector):
             current_replicas = hpa.get("currentReplicas", 0)
             current_cpu = hpa.get("currentCPUUtilizationPercentage")
             target_cpu = hpa.get("targetCPUUtilizationPercentage")
-            metrics = hpa.get("metrics", [])
+            hpa.get("metrics", [])
             conditions = hpa.get("conditions", [])
             target_ref = hpa.get("scaleTargetRef", {})
             workload = target_ref.get("name", hpa_name)
@@ -48,7 +49,9 @@ class HPADetector(BaseDetector):
 
             # 1. Locked scaling range (min == max)
             if min_replicas == max_replicas:
-                issues.append(f"minReplicas ({min_replicas}) == maxReplicas ({max_replicas}) — HPA cannot scale")
+                issues.append(
+                    f"minReplicas ({min_replicas}) == maxReplicas ({max_replicas}) — HPA cannot scale"
+                )
                 evidence.append(
                     self._make_evidence(
                         source="manifest",

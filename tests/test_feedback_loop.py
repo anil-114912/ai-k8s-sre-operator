@@ -1,7 +1,9 @@
 """Tests for the feedback learning loop — the core learning mechanism."""
+
 from __future__ import annotations
 
 import os
+
 import pytest
 
 os.environ["DEMO_MODE"] = "1"
@@ -10,10 +12,10 @@ from knowledge.feedback_loop import LearningLoop
 from knowledge.incident_store import IncidentStore
 from models.incident import Incident, IncidentType, Severity
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def store(tmp_path):
@@ -52,6 +54,7 @@ def _make_incident(
 # ---------------------------------------------------------------------------
 # 1. Capture unknown application errors
 # ---------------------------------------------------------------------------
+
 
 class TestCaptureUnknownErrors:
     """Tests for LearningLoop.capture_unknown_errors()."""
@@ -109,8 +112,9 @@ class TestCaptureUnknownErrors:
             workload="auth-service",
         )
         assert result is not None
-        assert any("traceback" in p.lower() or "valueerror" in p.lower()
-                    for p in result["log_patterns"])
+        assert any(
+            "traceback" in p.lower() or "valueerror" in p.lower() for p in result["log_patterns"]
+        )
 
     def test_captures_go_panic(self, loop):
         """Should capture Go panic patterns."""
@@ -139,7 +143,8 @@ class TestCaptureUnknownErrors:
         """get_learning_stats() should count captured patterns."""
         loop.capture_unknown_errors(
             ["ERROR something new happened"],
-            "ns1", "wl1",
+            "ns1",
+            "wl1",
         )
         stats = loop.get_learning_stats()
         assert stats["captured_error_patterns"] >= 1
@@ -148,6 +153,7 @@ class TestCaptureUnknownErrors:
 # ---------------------------------------------------------------------------
 # 2. Embedder refit
 # ---------------------------------------------------------------------------
+
 
 class TestEmbedderRefit:
     """Tests for periodic TF-IDF embedder refitting."""
@@ -176,6 +182,7 @@ class TestEmbedderRefit:
 # ---------------------------------------------------------------------------
 # 3. Feedback processing and pattern promotion
 # ---------------------------------------------------------------------------
+
 
 class TestFeedbackProcessing:
     """Tests for LearningLoop.on_feedback() and pattern promotion."""
@@ -207,7 +214,9 @@ class TestFeedbackProcessing:
         # First capture an error pattern
         loop.capture_unknown_errors(
             ["ERROR Redis connection refused"],
-            "production", "cache-worker", "CrashLoopBackOff",
+            "production",
+            "cache-worker",
+            "CrashLoopBackOff",
         )
 
         # Save an incident in the same namespace
@@ -223,14 +232,11 @@ class TestFeedbackProcessing:
 
         # Check that the learned pattern got the operator fix
         matching = [
-            p for p in loop._learned_patterns
-            if p.get("learned_from_namespace") == "production"
+            p for p in loop._learned_patterns if p.get("learned_from_namespace") == "production"
         ]
         assert len(matching) > 0
         has_operator_fix = any(
-            "[Operator fix]" in step
-            for p in matching
-            for step in p.get("remediation_steps", [])
+            "[Operator fix]" in step for p in matching for step in p.get("remediation_steps", [])
         )
         assert has_operator_fix
 
@@ -276,6 +282,7 @@ class TestFeedbackProcessing:
 # ---------------------------------------------------------------------------
 # 4. Confidence adjustment
 # ---------------------------------------------------------------------------
+
 
 class TestConfidenceAdjustment:
     """Tests for LearningLoop.adjust_confidence()."""
@@ -332,6 +339,7 @@ class TestConfidenceAdjustment:
 # ---------------------------------------------------------------------------
 # 5. End-to-end learning flow
 # ---------------------------------------------------------------------------
+
 
 class TestEndToEndLearningFlow:
     """Tests that simulate the full learning lifecycle."""
@@ -410,7 +418,8 @@ class TestEndToEndLearningFlow:
         # Capture an error
         loop.capture_unknown_errors(
             ["ERROR something unique 12345"],
-            "ns1", "wl1",
+            "ns1",
+            "wl1",
         )
 
         # Save and feedback
@@ -430,12 +439,14 @@ class TestEndToEndLearningFlow:
 # 6. API integration test (feedback endpoint → learning loop)
 # ---------------------------------------------------------------------------
 
+
 class TestFeedbackAPIIntegration:
     """Tests that the API endpoints correctly trigger the learning loop."""
 
     def test_structured_feedback_endpoint(self):
         """POST /api/v1/feedback/structured should trigger learning and return stats."""
         from fastapi.testclient import TestClient
+
         from api.main import app
 
         client = TestClient(app)
@@ -469,26 +480,33 @@ class TestFeedbackAPIIntegration:
     def test_basic_feedback_endpoint_updates_score(self):
         """POST /api/v1/feedback should update the incident's feedback_score."""
         from fastapi.testclient import TestClient
+
         from api.main import app
 
         client = TestClient(app)
 
-        created = client.post("/api/v1/incidents", json={
-            "title": "Test feedback score",
-            "incident_type": "OOMKilled",
-            "severity": "high",
-            "namespace": "prod",
-            "workload": "worker",
-            "provider_used": "simulation",
-        }).json()
+        created = client.post(
+            "/api/v1/incidents",
+            json={
+                "title": "Test feedback score",
+                "incident_type": "OOMKilled",
+                "severity": "high",
+                "namespace": "prod",
+                "workload": "worker",
+                "provider_used": "simulation",
+            },
+        ).json()
         inc_id = created["id"]
 
         # Submit feedback
-        client.post("/api/v1/feedback", json={
-            "incident_id": inc_id,
-            "success": True,
-            "notes": "Increased memory limit",
-        })
+        client.post(
+            "/api/v1/feedback",
+            json={
+                "incident_id": inc_id,
+                "success": True,
+                "notes": "Increased memory limit",
+            },
+        )
 
         # Verify the incident was updated
         inc = client.get(f"/api/v1/incidents/{inc_id}").json()
@@ -499,6 +517,7 @@ class TestFeedbackAPIIntegration:
     def test_learning_stats_endpoint(self):
         """GET /api/v1/stats/learning should return learning system stats."""
         from fastapi.testclient import TestClient
+
         from api.main import app
 
         client = TestClient(app)

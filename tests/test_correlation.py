@@ -1,7 +1,6 @@
 """Tests for signal correlation logic."""
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 from correlation.signal_correlator import SignalCorrelator
 from detectors.base import DetectionResult

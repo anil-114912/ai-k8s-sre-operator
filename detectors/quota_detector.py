@@ -1,4 +1,5 @@
 """Detector for ResourceQuota exceeded events."""
+
 from __future__ import annotations
 
 import logging
@@ -56,8 +57,17 @@ class QuotaDetector(BaseDetector):
             if quota_match:
                 quota_name = quota_match.group(1)
 
-            for res in ("cpu", "memory", "pods", "services", "persistentvolumeclaims",
-                        "requests.cpu", "requests.memory", "limits.cpu", "limits.memory"):
+            for res in (
+                "cpu",
+                "memory",
+                "pods",
+                "services",
+                "persistentvolumeclaims",
+                "requests.cpu",
+                "requests.memory",
+                "limits.cpu",
+                "limits.memory",
+            ):
                 if res in msg_lower:
                     resource_type = res
                     break
@@ -94,7 +104,9 @@ class QuotaDetector(BaseDetector):
             )
             logger.info(
                 "QuotaExceeded detected: namespace=%s quota=%s resource=%s",
-                namespace, quota_name, resource_type,
+                namespace,
+                quota_name,
+                resource_type,
             )
 
         return results

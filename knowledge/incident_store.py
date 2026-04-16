@@ -1,4 +1,5 @@
 """SQLite-backed incident history store using SQLAlchemy."""
+
 from __future__ import annotations
 
 import json
@@ -7,7 +8,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Column, DateTime, Float, String, Text, Boolean, create_engine
+from sqlalchemy import Boolean, Column, DateTime, Float, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from knowledge.embeddings import TFIDFEmbedder
@@ -96,7 +97,9 @@ class IncidentStore:
             database_url: SQLAlchemy database URL. Defaults to DATABASE_URL env var.
         """
         url = database_url or DATABASE_URL
-        self._engine = create_engine(url, connect_args={"check_same_thread": False} if "sqlite" in url else {})
+        self._engine = create_engine(
+            url, connect_args={"check_same_thread": False} if "sqlite" in url else {}
+        )
         Base.metadata.create_all(self._engine)
         self._migrate_schema()
         self._Session = sessionmaker(bind=self._engine)
@@ -143,9 +146,7 @@ class IncidentStore:
         # Serialize evidence, raw_signals, contributing_factors to JSON
         evidence_json = None
         if incident.evidence:
-            evidence_json = json.dumps(
-                [ev.model_dump() for ev in incident.evidence]
-            )
+            evidence_json = json.dumps([ev.model_dump() for ev in incident.evidence])
         raw_signals_json = None
         if incident.raw_signals:
             try:
@@ -164,7 +165,11 @@ class IncidentStore:
                 existing.suggested_fix = incident.suggested_fix
                 existing.ai_explanation = incident.ai_explanation
                 existing.embedding = TFIDFEmbedder.to_json(embedding)
-                existing.status = incident.status.value if hasattr(incident.status, 'value') else str(incident.status)
+                existing.status = (
+                    incident.status.value
+                    if hasattr(incident.status, "value")
+                    else str(incident.status)
+                )
                 if evidence_json:
                     existing.evidence_json = evidence_json
                 if raw_signals_json:
@@ -191,7 +196,9 @@ class IncidentStore:
                     raw_signals_json=raw_signals_json,
                     contributing_factors_json=contributing_json,
                     cluster_name=cluster_name,
-                    status=incident.status.value if hasattr(incident.status, 'value') else "detected",
+                    status=incident.status.value
+                    if hasattr(incident.status, "value")
+                    else "detected",
                     provider_used=incident.provider_used or "simulation",
                 )
                 session.add(record)
@@ -242,21 +249,23 @@ class IncidentStore:
             results = []
             for r in records:
                 vec = TFIDFEmbedder.from_json(r.embedding or "[]")
-                results.append({
-                    "id": r.id,
-                    "embedding": vec,
-                    "type": r.incident_type,
-                    "namespace": r.namespace,
-                    "workload": r.workload,
-                    "root_cause": r.root_cause,
-                    "suggested_fix": r.suggested_fix,
-                    "resolved": r.resolved,
-                    "cluster_name": getattr(r, "cluster_name", None),
-                    "feedback_score": getattr(r, "feedback_score", 0.0) or 0.0,
-                    "resolution_outcome": getattr(r, "resolution_outcome", None),
-                    "created_at": r.created_at.isoformat() if r.created_at else None,
-                    "title": r.title,
-                })
+                results.append(
+                    {
+                        "id": r.id,
+                        "embedding": vec,
+                        "type": r.incident_type,
+                        "namespace": r.namespace,
+                        "workload": r.workload,
+                        "root_cause": r.root_cause,
+                        "suggested_fix": r.suggested_fix,
+                        "resolved": r.resolved,
+                        "cluster_name": getattr(r, "cluster_name", None),
+                        "feedback_score": getattr(r, "feedback_score", 0.0) or 0.0,
+                        "resolution_outcome": getattr(r, "resolution_outcome", None),
+                        "created_at": r.created_at.isoformat() if r.created_at else None,
+                        "title": r.title,
+                    }
+                )
             return results
 
     def get_by_namespace(self, namespace: str) -> List[Dict[str, Any]]:
@@ -331,14 +340,14 @@ class IncidentStore:
                 session.commit()
                 logger.info(
                     "Updated feedback: incident=%s success=%s score=%.1f",
-                    incident_id, success, record.feedback_score,
+                    incident_id,
+                    success,
+                    record.feedback_score,
                 )
             else:
                 logger.warning("update_feedback: incident %s not found", incident_id)
 
-    def get_cluster_patterns(
-        self, cluster_name: str, limit: int = 10
-    ) -> List[Dict[str, Any]]:
+    def get_cluster_patterns(self, cluster_name: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Return the most frequent failure types for a specific cluster.
 
         Args:
@@ -350,6 +359,7 @@ class IncidentStore:
         """
         with Session(self._engine) as session:
             from sqlalchemy import func
+
             results = (
                 session.query(
                     IncidentRecord.incident_type,
@@ -388,6 +398,7 @@ class IncidentStore:
             The feedback record UUID.
         """
         import uuid as _uuid
+
         fb_id = str(_uuid.uuid4())
         with Session(self._engine) as session:
             record = StructuredFeedbackRecord(
@@ -402,7 +413,10 @@ class IncidentStore:
             session.commit()
         logger.info(
             "Saved structured feedback: id=%s incident=%s rca_correct=%s fix_worked=%s",
-            fb_id, incident_id, correct_root_cause, fix_worked,
+            fb_id,
+            incident_id,
+            correct_root_cause,
+            fix_worked,
         )
         return fb_id
 
@@ -482,12 +496,12 @@ class IncidentStore:
                 }
             correct_rca = (
                 session.query(StructuredFeedbackRecord)
-                .filter(StructuredFeedbackRecord.correct_root_cause == True)
+                .filter(StructuredFeedbackRecord.correct_root_cause)
                 .count()
             )
             fix_success = (
                 session.query(StructuredFeedbackRecord)
-                .filter(StructuredFeedbackRecord.fix_worked == True)
+                .filter(StructuredFeedbackRecord.fix_worked)
                 .count()
             )
             return {
@@ -514,6 +528,7 @@ class IncidentStore:
             feedback_notes: Operator feedback notes.
         """
         import uuid
+
         with Session(self._engine) as session:
             record = RemediationOutcomeRecord(
                 id=str(uuid.uuid4()),
@@ -529,9 +544,7 @@ class IncidentStore:
                 if parent:
                     parent.resolved = True
             session.commit()
-        logger.info(
-            "Saved remediation outcome: incident=%s success=%s", incident_id, success
-        )
+        logger.info("Saved remediation outcome: incident=%s success=%s", incident_id, success)
 
     @staticmethod
     def _incident_to_text(incident: Incident) -> str:

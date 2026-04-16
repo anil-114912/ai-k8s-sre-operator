@@ -1,22 +1,21 @@
 """Tests for all incident detectors."""
+
 from __future__ import annotations
 
-import pytest
-
 from detectors.crashloop_detector import CrashLoopDetector
-from detectors.oomkill_detector import OOMKillDetector
+from detectors.hpa_detector import HPADetector
 from detectors.imagepull_detector import ImagePullDetector
+from detectors.ingress_detector import IngressDetector
+from detectors.oomkill_detector import OOMKillDetector
 from detectors.pending_pods_detector import PendingPodsDetector
 from detectors.probe_failure_detector import ProbeFailureDetector
-from detectors.service_detector import ServiceDetector
-from detectors.ingress_detector import IngressDetector
 from detectors.pvc_detector import PVCDetector
-from detectors.hpa_detector import HPADetector
-
+from detectors.service_detector import ServiceDetector
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
+
 
 def empty_cluster_state():
     """Return an empty cluster state dict for negative test cases."""
@@ -93,6 +92,7 @@ def make_pod(
 # CrashLoop detector tests
 # ---------------------------------------------------------------------------
 
+
 class TestCrashLoopDetector:
     """Tests for CrashLoopDetector."""
 
@@ -118,9 +118,7 @@ class TestCrashLoopDetector:
     def test_detects_high_restart_count(self):
         """Should detect a pod with restart count > threshold even without CrashLoop state."""
         state = empty_cluster_state()
-        state["pods"] = [
-            make_pod(name="worker-abc-xyz", restart_count=8)
-        ]
+        state["pods"] = [make_pod(name="worker-abc-xyz", restart_count=8)]
         detector = CrashLoopDetector()
         results = detector.detect(state)
         assert len(results) == 1
@@ -152,6 +150,7 @@ class TestCrashLoopDetector:
 # ---------------------------------------------------------------------------
 # OOMKill detector tests
 # ---------------------------------------------------------------------------
+
 
 class TestOOMKillDetector:
     """Tests for OOMKillDetector."""
@@ -186,9 +185,7 @@ class TestOOMKillDetector:
     def test_no_detection_for_normal_exit(self):
         """Should not detect OOM for a pod with normal termination."""
         state = empty_cluster_state()
-        state["pods"] = [
-            make_pod(name="worker-abc-xyz", last_terminated_reason="Completed")
-        ]
+        state["pods"] = [make_pod(name="worker-abc-xyz", last_terminated_reason="Completed")]
         detector = OOMKillDetector()
         results = detector.detect(state)
         assert results == []
@@ -211,6 +208,7 @@ class TestOOMKillDetector:
 # ---------------------------------------------------------------------------
 # ImagePull detector tests
 # ---------------------------------------------------------------------------
+
 
 class TestImagePullDetector:
     """Tests for ImagePullDetector."""
@@ -259,12 +257,14 @@ class TestImagePullDetector:
 # Pending pods detector tests
 # ---------------------------------------------------------------------------
 
+
 class TestPendingPodsDetector:
     """Tests for PendingPodsDetector."""
 
     def test_detects_long_pending_pod(self):
         """Should detect pods pending beyond the threshold."""
         from datetime import datetime, timedelta, timezone
+
         old_ts = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
         state = empty_cluster_state()
         pod = make_pod(name="data-abc-xyz", phase="Pending")
@@ -288,6 +288,7 @@ class TestPendingPodsDetector:
     def test_no_detection_for_recently_pending_pod(self):
         """Should not flag pods that just recently entered Pending state."""
         from datetime import datetime, timedelta, timezone
+
         recent_ts = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
         state = empty_cluster_state()
         pod = make_pod(name="data-abc-xyz", phase="Pending")
@@ -311,6 +312,7 @@ class TestPendingPodsDetector:
 # Probe failure detector tests
 # ---------------------------------------------------------------------------
 
+
 class TestProbeFailureDetector:
     """Tests for ProbeFailureDetector."""
 
@@ -323,7 +325,11 @@ class TestProbeFailureDetector:
                 "message": "Readiness probe failed: HTTP probe failed with statuscode: 503",
                 "type": "Warning",
                 "count": 5,
-                "involvedObject": {"name": "frontend-abc-xyz", "kind": "Pod", "namespace": "production"},
+                "involvedObject": {
+                    "name": "frontend-abc-xyz",
+                    "kind": "Pod",
+                    "namespace": "production",
+                },
                 "namespace": "production",
             }
         ]
@@ -354,6 +360,7 @@ class TestProbeFailureDetector:
 # Service detector tests
 # ---------------------------------------------------------------------------
 
+
 class TestServiceDetector:
     """Tests for ServiceDetector."""
 
@@ -368,9 +375,7 @@ class TestServiceDetector:
                 "selector": {"app": "old-service", "version": "v1"},
             }
         ]
-        state["pods"] = [
-            make_pod(name="new-service-abc-xyz", namespace="staging")
-        ]
+        state["pods"] = [make_pod(name="new-service-abc-xyz", namespace="staging")]
         detector = ServiceDetector()
         results = detector.detect(state)
         assert len(results) == 1
@@ -407,6 +412,7 @@ class TestServiceDetector:
 # Ingress detector tests
 # ---------------------------------------------------------------------------
 
+
 class TestIngressDetector:
     """Tests for IngressDetector."""
 
@@ -425,7 +431,10 @@ class TestIngressDetector:
                                 {
                                     "path": "/",
                                     "backend": {
-                                        "service": {"name": "missing-backend", "port": {"number": 8080}}
+                                        "service": {
+                                            "name": "missing-backend",
+                                            "port": {"number": 8080},
+                                        }
                                     },
                                 }
                             ]
@@ -452,7 +461,12 @@ class TestIngressDetector:
                         "host": "app.example.com",
                         "http": {
                             "paths": [
-                                {"path": "/", "backend": {"service": {"name": "frontend", "port": {"number": 80}}}}
+                                {
+                                    "path": "/",
+                                    "backend": {
+                                        "service": {"name": "frontend", "port": {"number": 80}}
+                                    },
+                                }
                             ]
                         },
                     }
@@ -460,10 +474,19 @@ class TestIngressDetector:
             }
         ]
         state["services"] = [
-            {"name": "frontend", "namespace": "production", "type": "ClusterIP", "selector": {"app": "frontend"}}
+            {
+                "name": "frontend",
+                "namespace": "production",
+                "type": "ClusterIP",
+                "selector": {"app": "frontend"},
+            }
         ]
         state["endpoints"] = [
-            {"name": "frontend", "namespace": "production", "subsets": [{"addresses": [{"ip": "10.0.0.1"}]}]}
+            {
+                "name": "frontend",
+                "namespace": "production",
+                "subsets": [{"addresses": [{"ip": "10.0.0.1"}]}],
+            }
         ]
         detector = IngressDetector()
         results = detector.detect(state)
@@ -473,6 +496,7 @@ class TestIngressDetector:
 # ---------------------------------------------------------------------------
 # PVC detector tests
 # ---------------------------------------------------------------------------
+
 
 class TestPVCDetector:
     """Tests for PVCDetector."""
@@ -503,7 +527,11 @@ class TestPVCDetector:
                 "reason": "FailedMount",
                 "message": "Unable to attach or mount volumes: timed out waiting for the condition",
                 "type": "Warning",
-                "involvedObject": {"name": "data-pipeline-abc-xyz", "kind": "Pod", "namespace": "production"},
+                "involvedObject": {
+                    "name": "data-pipeline-abc-xyz",
+                    "kind": "Pod",
+                    "namespace": "production",
+                },
                 "namespace": "production",
             }
         ]
@@ -514,9 +542,7 @@ class TestPVCDetector:
     def test_no_detection_for_bound_pvc(self):
         """Should not detect a Bound PVC as an issue."""
         state = empty_cluster_state()
-        state["pvcs"] = [
-            {"name": "healthy-pvc", "namespace": "production", "phase": "Bound"}
-        ]
+        state["pvcs"] = [{"name": "healthy-pvc", "namespace": "production", "phase": "Bound"}]
         detector = PVCDetector()
         results = detector.detect(state)
         assert results == []
@@ -525,6 +551,7 @@ class TestPVCDetector:
 # ---------------------------------------------------------------------------
 # HPA detector tests
 # ---------------------------------------------------------------------------
+
 
 class TestHPADetector:
     """Tests for HPADetector."""

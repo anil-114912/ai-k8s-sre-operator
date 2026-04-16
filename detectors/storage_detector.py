@@ -1,4 +1,5 @@
 """Detector for CSI/storage failures including mount failures and driver issues."""
+
 from __future__ import annotations
 
 import logging
@@ -51,7 +52,7 @@ class StorageDetector(BaseDetector):
         events = cluster_state.get("events", [])
         pvcs = cluster_state.get("pvcs", [])
         storage_classes = cluster_state.get("storage_classes", [])
-        pods = cluster_state.get("pods", [])
+        cluster_state.get("pods", [])
 
         seen: Dict[str, bool] = {}
 
@@ -76,7 +77,9 @@ class StorageDetector(BaseDetector):
             # Classify storage issue type
             if "not found" in message_lower or "volume not found" in message_lower:
                 issue_type = "pv_not_found"
-            elif "storageclass" in message_lower and ("not found" in message_lower or "missing" in message_lower):
+            elif "storageclass" in message_lower and (
+                "not found" in message_lower or "missing" in message_lower
+            ):
                 issue_type = "storageclass_missing"
             elif "csi" in message_lower:
                 issue_type = "csi_driver_error"

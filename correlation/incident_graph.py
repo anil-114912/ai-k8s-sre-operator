@@ -1,8 +1,9 @@
 """Builds a graph of related resources for a detected incident."""
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +107,10 @@ class IncidentGraph:
                 if pvc.get("namespace") != namespace:
                     continue
                 pvc_node = ResourceNode(
-                    "PVC", pvc.get("name", ""), namespace,
-                    "root_cause" if incident_type == "PVCFailure" else "contributing_factor"
+                    "PVC",
+                    pvc.get("name", ""),
+                    namespace,
+                    "root_cause" if incident_type == "PVCFailure" else "contributing_factor",
                 )
                 self.add_node(pvc_node)
                 if pod_name:

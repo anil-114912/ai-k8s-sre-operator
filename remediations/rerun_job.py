@@ -1,4 +1,5 @@
 """Remediation: re-create a failed Kubernetes Job."""
+
 from __future__ import annotations
 
 import logging
@@ -48,6 +49,7 @@ class RerunJobRemediation(BaseRemediation):
         start = time.time()
         try:
             from providers.kubernetes import get_k8s_client
+
             client = get_k8s_client()
             client.rerun_job(namespace=namespace, job_name=job_name)
             duration = time.time() - start

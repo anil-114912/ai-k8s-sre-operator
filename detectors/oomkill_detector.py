@@ -1,4 +1,5 @@
 """Detector for OOMKilled (Out-Of-Memory killed) container incidents."""
+
 from __future__ import annotations
 
 import logging
@@ -31,7 +32,9 @@ class OOMKillDetector(BaseDetector):
         for pod in pods:
             pod_name = pod.get("name", "")
             namespace = pod.get("namespace", "default")
-            workload = pod.get("workload", pod_name.rsplit("-", 2)[0] if "-" in pod_name else pod_name)
+            workload = pod.get(
+                "workload", pod_name.rsplit("-", 2)[0] if "-" in pod_name else pod_name
+            )
 
             container_statuses = pod.get("container_statuses", [])
             for cs in container_statuses:
@@ -115,8 +118,6 @@ class OOMKillDetector(BaseDetector):
                         },
                     )
                 )
-                logger.info(
-                    "OOMKill detected: pod=%s container=%s", pod_name, container_name
-                )
+                logger.info("OOMKill detected: pod=%s container=%s", pod_name, container_name)
 
         return results

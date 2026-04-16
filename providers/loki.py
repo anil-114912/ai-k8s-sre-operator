@@ -1,4 +1,5 @@
 """Loki HTTP API client (optional log aggregation)."""
+
 from __future__ import annotations
 
 import logging
@@ -73,7 +74,9 @@ class LokiClient:
             logger.warning("Loki query failed: %s", exc)
             return []
 
-    def get_pod_logs(self, namespace: str, pod: str, container: str = "", lines: int = 50) -> List[str]:
+    def get_pod_logs(
+        self, namespace: str, pod: str, container: str = "", lines: int = 50
+    ) -> List[str]:
         """Retrieve recent logs for a specific pod from Loki.
 
         Args:

@@ -1,4 +1,5 @@
 """Remediation: rollback a deployment to its previous revision."""
+
 from __future__ import annotations
 
 import logging
@@ -47,6 +48,7 @@ class RollbackDeploymentRemediation(BaseRemediation):
         start = time.time()
         try:
             from providers.kubernetes import get_k8s_client
+
             client = get_k8s_client()
             client.rollback_deployment(namespace=namespace, deployment=workload, revision=revision)
             duration = time.time() - start
