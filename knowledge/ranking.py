@@ -144,6 +144,20 @@ class RemediationRanker:
             )
         return insights
 
+    def score_step(self, step: Any, incident_type: str = "Unknown") -> float:
+        """Return the ranking score for a single step without sorting a list.
+
+        Args:
+            step: A RemediationStep or dict with 'action' and 'safety_level'.
+            incident_type: Incident type for type-specific success rate lookup.
+
+        Returns:
+            Float score in [0.0, 1.0].
+        """
+        action = self._get_action(step)
+        safety_level = self._get_safety_level(step)
+        return self._compute_score(action, incident_type, safety_level)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

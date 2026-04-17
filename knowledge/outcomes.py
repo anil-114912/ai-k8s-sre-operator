@@ -143,6 +143,23 @@ class OutcomeStore:
         """Return the total number of outcome records."""
         return sum(len(v) for v in self._by_action.values())
 
+    def get_all_stats(self) -> Dict[str, Any]:
+        """Return stats for all actions and incident types.
+
+        Returns:
+            Dict mapping action names to their success rates and counts.
+        """
+        stats: Dict[str, Any] = {}
+        for action, outcomes in self._by_action.items():
+            successes = sum(1 for o in outcomes if o.success)
+            stats[action] = {
+                "action": action,
+                "total": len(outcomes),
+                "successes": successes,
+                "success_rate": round(successes / len(outcomes), 3) if outcomes else 0.5,
+            }
+        return stats
+
     def load_from_store(self, incident_store: Optional[object] = None) -> int:
         """Populate the cache from the persistent IncidentStore.
 

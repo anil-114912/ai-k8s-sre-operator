@@ -204,7 +204,7 @@ class ConfidenceCalculator:
                 factors.append("No pod logs available")
                 return 0.1
             error_lines = [
-                l for l in logs if any(w in l.upper() for w in ("ERROR", "FATAL", "EXCEPTION"))
+                line for line in logs if any(w in line.upper() for w in ("ERROR", "FATAL", "EXCEPTION"))
             ]
             if error_lines:
                 factors.append(f"{len(error_lines)} error line(s) found in pod logs")

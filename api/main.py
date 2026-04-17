@@ -1590,3 +1590,446 @@ async def evaluate_guardrails(incident_id: str) -> Dict[str, Any]:
         "audit_log": decision.audit_log,
         "evaluated_at": decision.evaluated_at,
     }
+
+
+# ---------------------------------------------------------------------------
+# Audit log endpoints
+# ---------------------------------------------------------------------------
+
+from audit.logger import get_audit_logger as _get_audit_logger  # noqa: E402
+
+_audit_logger = _get_audit_logger()
+
+
+@app.get("/api/v1/audit/events")
+async def get_audit_events(limit: int = Query(100, le=500)) -> Dict[str, Any]:
+    """Return recent audit events (remediations approved, blocked, auto-executed).
+
+    Args:
+        limit: Maximum number of events to return (default 100, max 500).
+
+    Returns:
+        Dict with events list and aggregate stats.
+    """
+    return {
+        "events": _audit_logger.get_recent(limit=limit),
+        "stats": _audit_logger.get_stats(),
+    }
+
+
+@app.get("/api/v1/audit/incidents/{incident_id}")
+async def get_audit_events_for_incident(incident_id: str) -> Dict[str, Any]:
+    """Return all audit events for a specific incident.
+
+    Args:
+        incident_id: Incident ID.
+
+    Returns:
+        List of audit events referencing this incident.
+    """
+    events = _audit_logger.get_by_incident(incident_id)
+    return {"incident_id": incident_id, "events": events, "count": len(events)}
+
+
+# ---------------------------------------------------------------------------
+# Anomaly detection endpoints
+# ---------------------------------------------------------------------------
+
+from anomaly.metrics_analyzer import MetricsAnalyzer as _MetricsAnalyzer  # noqa: E402
+
+_anomaly_analyzer = _MetricsAnalyzer()
+
+
+@app.post("/api/v1/anomaly/ingest", status_code=202)
+async def anomaly_ingest(report: APMIngestRequest) -> Dict[str, Any]:
+    """Ingest an APM report into the anomaly analyzer for proactive spike detection.
+
+    The analyzer runs CPU, memory, error-rate, latency, and restart-rate checks
+    and fires early-warning alerts *before* a formal incident is detected.
+
+    Returns:
+        Dict with alerts fired (if any) and current analyzer summary.
+    """
+    metrics = {
+        "cpu_usage_percent": report.metrics.get("cpu_usage_percent", 0.0),
+        "memory_mb": report.metrics.get("memory_mb", 0.0),
+        "error_rate": report.error_rate,
+        "latency_p95_ms": report.metrics.get("latency_p95_ms", 0.0),
+        "restart_count": report.metrics.get("restart_count", 0),
+    }
+    _anomaly_analyzer.record(
+        service=report.service_name,
+        namespace=report.namespace,
+        metrics=metrics,
+    )
+    alerts = _anomaly_analyzer.analyze(report.service_name, report.namespace)
+    return {
+        "service": report.service_name,
+        "namespace": report.namespace,
+        "alerts_fired": len(alerts),
+        "alerts": [a.to_dict() for a in alerts],
+    }
+
+
+@app.get("/api/v1/anomaly/alerts")
+async def get_anomaly_alerts(
+    service: Optional[str] = Query(None),
+    namespace: Optional[str] = Query(None),
+    limit: int = Query(50, le=200),
+) -> Dict[str, Any]:
+    """Return recent anomaly alerts, optionally filtered by service/namespace.
+
+    Args:
+        service: Filter by service name.
+        namespace: Filter by namespace.
+        limit: Maximum results.
+
+    Returns:
+        Dict with alerts list and analyzer summary.
+    """
+    alerts = _anomaly_analyzer.get_recent_alerts(service=service, namespace=namespace, limit=limit)
+    return {
+        "alerts": alerts,
+        "count": len(alerts),
+        "summary": _anomaly_analyzer.summary(),
+        "tracked_services": _anomaly_analyzer.get_tracked_services(),
+    }
+
+
+@app.post("/api/v1/anomaly/analyze")
+async def trigger_anomaly_analysis() -> Dict[str, Any]:
+    """Run anomaly analysis across all tracked services immediately.
+
+    Returns:
+        All alerts fired across all services.
+    """
+    all_alerts = _anomaly_analyzer.analyze_all()
+    return {
+        "alerts_fired": len(all_alerts),
+        "alerts": [a.to_dict() for a in all_alerts],
+        "summary": _anomaly_analyzer.summary(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Integration management endpoints
+# ---------------------------------------------------------------------------
+
+from integrations.dispatcher import IntegrationDispatcher as _IntegrationDispatcher  # noqa: E402
+
+_integration_dispatcher = _IntegrationDispatcher.from_env()
+
+
+@app.get("/api/v1/integrations/status")
+async def get_integration_status() -> Dict[str, Any]:
+    """Return enabled/disabled status for all configured integrations (Slack, PagerDuty, Jira).
+
+    Returns:
+        Dict with per-integration status.
+    """
+    return {
+        "integrations": _integration_dispatcher.status(),
+        "total_enabled": len(_integration_dispatcher),
+    }
+
+
+@app.post("/api/v1/integrations/test/{integration_name}")
+async def test_integration(integration_name: str) -> Dict[str, Any]:
+    """Send a test notification via a specific integration.
+
+    Args:
+        integration_name: One of: slack, pagerduty, jira.
+
+    Returns:
+        Result of the test notification attempt.
+    """
+    # Build a fake incident for testing
+    class _FakeIncident:
+        id = "test-001"
+        namespace = "test"
+        workload = "test-workload"
+        incident_type = "TestAlert"
+        severity = "low"
+        confidence = 0.99
+        root_cause = "This is a test notification from AI K8s SRE Operator."
+
+    fake = _FakeIncident()
+    results = _integration_dispatcher.dispatch_incident(fake)
+    matching = [r for r in results if r.integration == integration_name]
+    if not matching:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Integration '{integration_name}' not found or not enabled",
+        )
+    r = matching[0]
+    return {
+        "integration": r.integration,
+        "success": r.success,
+        "external_id": r.external_id,
+        "url": r.url,
+        "error": r.error,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Multi-cluster registry endpoints
+# ---------------------------------------------------------------------------
+
+from multi_cluster.registry import ClusterInfo as _ClusterInfo  # noqa: E402
+from multi_cluster.registry import get_cluster_registry as _get_cluster_registry  # noqa: E402
+
+_cluster_registry = _get_cluster_registry()
+
+
+class ClusterRegistrationRequest(BaseModel):
+    """Payload for registering a cluster with the control plane."""
+
+    cluster_id: str
+    name: str
+    api_url: str
+    provider: str = "unknown"
+    region: str = ""
+    environment: str = "unknown"
+    tags: List[str] = []
+
+
+@app.get("/api/v1/clusters")
+async def list_clusters(
+    environment: Optional[str] = Query(None),
+    provider: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """List all registered clusters, optionally filtered.
+
+    Args:
+        environment: Filter by environment (production, staging, development).
+        provider: Filter by cloud provider (aws, gcp, azure).
+
+    Returns:
+        Fleet health summary with cluster list.
+    """
+    return _cluster_registry.fleet_health_summary()
+
+
+@app.post("/api/v1/clusters", status_code=201)
+async def register_cluster(req: ClusterRegistrationRequest) -> Dict[str, Any]:
+    """Register a new cluster with the control plane.
+
+    Args:
+        req: Cluster registration payload.
+
+    Returns:
+        Registered cluster info.
+    """
+    cluster = _ClusterInfo(
+        cluster_id=req.cluster_id,
+        name=req.name,
+        api_url=req.api_url,
+        provider=req.provider,
+        region=req.region,
+        environment=req.environment,
+        tags=req.tags,
+    )
+    _cluster_registry.register(cluster)
+    return cluster.to_dict()
+
+
+@app.get("/api/v1/clusters/{cluster_id}/health")
+async def get_cluster_health(cluster_id: str) -> Dict[str, Any]:
+    """Get health score and status for a specific cluster.
+
+    Args:
+        cluster_id: Cluster identifier.
+
+    Returns:
+        Health dict with score, grade, status, last_seen.
+    """
+    cluster = _cluster_registry.get(cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail=f"Cluster '{cluster_id}' not registered")
+    return {
+        "cluster_id": cluster_id,
+        "name": cluster.name,
+        "score": cluster.health.score,
+        "grade": cluster.health.grade,
+        "status": cluster.health.status,
+        "incident_count": cluster.health.incident_count,
+        "last_updated": cluster.health.last_updated,
+        "last_seen": cluster.last_seen,
+    }
+
+
+@app.post("/api/v1/clusters/{cluster_id}/health")
+async def update_cluster_health(
+    cluster_id: str,
+    score: float = Query(..., ge=0, le=100),
+    incident_count: int = Query(0, ge=0),
+) -> Dict[str, Any]:
+    """Update the health score for a registered cluster.
+
+    Typically called by a cluster agent pushing its latest health snapshot.
+
+    Args:
+        cluster_id: Cluster identifier.
+        score: Health score 0–100.
+        incident_count: Current active incident count.
+
+    Returns:
+        Updated health record.
+    """
+    ok = _cluster_registry.update_health(cluster_id, score=score, incident_count=incident_count)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Cluster '{cluster_id}' not registered")
+    cluster = _cluster_registry.get(cluster_id)
+    return {
+        "cluster_id": cluster_id,
+        "score": cluster.health.score,
+        "grade": cluster.health.grade,
+        "status": cluster.health.status,
+        "updated_at": cluster.health.last_updated,
+    }
+
+
+@app.post("/api/v1/clusters/{cluster_id}/heartbeat")
+async def cluster_heartbeat(cluster_id: str) -> Dict[str, Any]:
+    """Record a heartbeat from a cluster agent (marks it as reachable).
+
+    Args:
+        cluster_id: Cluster identifier.
+
+    Returns:
+        Acknowledgment with last_seen timestamp.
+    """
+    ok = _cluster_registry.heartbeat(cluster_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Cluster '{cluster_id}' not registered")
+    cluster = _cluster_registry.get(cluster_id)
+    return {"cluster_id": cluster_id, "last_seen": cluster.last_seen, "status": "ok"}
+
+
+@app.get("/api/v1/fleet/health")
+async def fleet_health() -> Dict[str, Any]:
+    """Return aggregated health across all registered clusters.
+
+    Returns:
+        Fleet health summary with per-cluster breakdown.
+    """
+    return _cluster_registry.fleet_health_summary()
+
+
+# ---------------------------------------------------------------------------
+# Learning insights endpoints (Phase 4)
+# ---------------------------------------------------------------------------
+
+from knowledge.outcomes import OutcomeStore as _OutcomeStore  # noqa: E402
+from knowledge.ranking import RemediationRanker as _RemediationRanker  # noqa: E402
+
+_outcome_store = _OutcomeStore()
+_remediation_ranker = _RemediationRanker(_outcome_store)
+
+
+@app.get("/api/v1/learning/outcomes")
+async def get_remediation_outcomes(
+    action: Optional[str] = Query(None, description="Filter by action name"),
+    incident_type: Optional[str] = Query(None),
+    limit: int = Query(50, le=200),
+) -> Dict[str, Any]:
+    """Return historical remediation success rates.
+
+    Args:
+        action: Filter by specific action (e.g. restart_pod, rollback_deployment).
+        incident_type: Filter by incident type.
+        limit: Max results.
+
+    Returns:
+        Dict with success rates per action and incident type.
+    """
+    stats = _outcome_store.get_all_stats()
+    if action:
+        stats = {k: v for k, v in stats.items() if k.startswith(action)}
+    return {"outcomes": stats, "count": len(stats)}
+
+
+@app.post("/api/v1/learning/outcomes")
+async def record_remediation_outcome(
+    incident_id: str,
+    action: str,
+    success: bool,
+    incident_type: str = "",
+    namespace: str = "",
+    workload: str = "",
+    notes: str = "",
+) -> Dict[str, Any]:
+    """Record the outcome of a remediation action for future ranking.
+
+    Args:
+        incident_id: The incident this remediation was applied to.
+        action: The action taken (e.g. restart_pod).
+        success: Whether the action resolved the incident.
+        incident_type: Incident type for cross-type learning.
+        namespace: Namespace where the action was taken.
+        workload: Workload name.
+        notes: Optional operator notes.
+
+    Returns:
+        Updated success rate for this action.
+    """
+    _outcome_store.record(
+        incident_id=incident_id,
+        action=action,
+        incident_type=incident_type,
+        namespace=namespace,
+        workload=workload,
+        success=success,
+        feedback_notes=notes,
+    )
+    return {
+        "recorded": True,
+        "action": action,
+        "success_rate": _outcome_store.get_success_rate(action),
+    }
+
+
+@app.get("/api/v1/learning/ranking")
+async def get_remediation_ranking(
+    incident_type: str = Query(..., description="Incident type to rank remediations for"),
+) -> Dict[str, Any]:
+    """Return ranked remediation actions for a given incident type.
+
+    Actions are ranked by: (0.6 × historical_success_rate) + (0.4 × safety_base_score).
+
+    Args:
+        incident_type: The incident type to look up.
+
+    Returns:
+        Ranked list of actions with scores.
+    """
+    from models.remediation import RemediationStep
+
+    # Get known actions for this type from the KB
+    kb_results = _kb.search(incident_type, limit=5)
+    steps = []
+    for result in kb_results:
+        for action_name in (result.pattern.get("remediation_steps") or []):
+            if isinstance(action_name, dict):
+                action_name = action_name.get("action", str(action_name))
+            steps.append(RemediationStep(
+                action=str(action_name),
+                description="",
+                safety_level="suggest_only",
+            ))
+
+    if not steps:
+        return {"incident_type": incident_type, "ranked_steps": [], "note": "No KB steps found"}
+
+    ranked = _remediation_ranker.rank(steps=steps, incident_type=incident_type)
+    return {
+        "incident_type": incident_type,
+        "ranked_steps": [
+            {
+                "action": s.action,
+                "score": _remediation_ranker.score_step(s, incident_type),
+                "safety_level": s.safety_level,
+            }
+            for s in ranked
+        ],
+    }

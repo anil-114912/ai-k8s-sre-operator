@@ -156,3 +156,55 @@ serviceMonitor:
   interval: 30s
   scrapeTimeout: 10s
   labels: {}
+
+## Sidecar auto-injection webhook
+webhook:
+  enabled: false                    # Set true to enable MutatingWebhookConfiguration
+  image: ""                         # Defaults to same repo/tag as main image
+  port: 8443
+  certManager: false                # Use cert-manager to provision TLS (recommended)
+  caBundle: ""                      # Manual base64-encoded CA cert (if certManager: false)
+  failurePolicy: Ignore             # Ignore = don't block pod creation if webhook is down
+  namespaceSelector:
+    matchLabels:
+      ai-sre/enabled: "true"
+
+## External notification integrations
+integrations:
+  slack:
+    enabled: false
+    webhookUrl: ""                  # or use existingSecret
+    channel: ""
+    mentionOnCritical: ""           # Slack user/group ID to mention for critical alerts
+    existingSecret: ""              # Secret key: SLACK_WEBHOOK_URL
+  pagerduty:
+    enabled: false
+    routingKey: ""
+    existingSecret: ""              # Secret key: PAGERDUTY_ROUTING_KEY
+  jira:
+    enabled: false
+    url: ""                         # e.g. https://yourorg.atlassian.net
+    projectKey: ""
+    email: ""
+    existingSecret: ""              # Secret keys: JIRA_API_TOKEN
+    issueType: Bug
+    labels:
+      - sre
+      - kubernetes
+
+## PostgreSQL (optional — SQLite is the default)
+postgresql:
+  enabled: false
+  host: ""
+  port: 5432
+  database: sre_operator
+  username: sre_operator
+  existingSecret: ""                # Secret key: DATABASE_URL (full connection string)
+
+## Multi-cluster federation (Phase 4 — planned)
+multiCluster:
+  enabled: false
+  mode: standalone                  # standalone | control-plane | cluster-agent
+  controlPlaneUrl: ""               # Required when mode=cluster-agent
+  clusterId: ""                     # Unique ID for this cluster
+  pushInterval: 60                  # Seconds between health push to control plane

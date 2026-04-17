@@ -6,6 +6,102 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 
 ---
 
+## [0.3.0] — 2026-04-16
+
+### Added
+
+**External integrations (Slack, PagerDuty, Jira)**
+
+- `integrations/slack.py` — Incoming Webhook notifications with rich Block Kit attachments; critical-alert `@mention` support
+- `integrations/pagerduty.py` — Events API v2: trigger, acknowledge, and resolve alerts with stable dedup keys
+- `integrations/jira.py` — Creates Bug issues with severity-mapped priorities; adds remediation comments via API
+- `integrations/dispatcher.py` — Thread-pool fan-out to all enabled integrations; `IntegrationDispatcher.from_env()` and `from_config()` factories
+- All three integrations configurable via env vars (`SLACK_WEBHOOK_URL`, `PAGERDUTY_ROUTING_KEY`, `JIRA_*`) — disabled by default
+- `GET /api/v1/integrations/status` — shows which integrations are enabled
+- `POST /api/v1/integrations/test/{name}` — sends a test notification
+
+**Proactive anomaly detection**
+
+- `anomaly/metrics_analyzer.py` — rolling-window anomaly detection over APM metrics:
+  - CPU spike (>80% absolute + >30-point delta from mean)
+  - Memory growth trend (steady upward slope ≥15% over window)
+  - Error rate spike (3× above baseline)
+  - Latency spike (p95 > 1 second or 2.5× baseline)
+  - Pod restart rate (≥3 new restarts in last 5 samples)
+- `POST /api/v1/anomaly/ingest` — feed APM reports into the analyzer
+- `GET /api/v1/anomaly/alerts` — query recent early-warning alerts
+- `POST /api/v1/anomaly/analyze` — trigger immediate analysis of all tracked services
+- Anomaly Alerts panel added to APM tab in Streamlit dashboard
+
+**Audit logging**
+
+- `audit/logger.py` — thread-safe structured audit logger
+- Records every remediation approval, block, auto-execution, and guardrails decision as JSON-L
+- In-memory rolling buffer (last 500 events) + file persistence to `/tmp/sre-operator-audit.jsonl`
+- `GET /api/v1/audit/events` — query recent events with aggregate stats
+- `GET /api/v1/audit/incidents/{id}` — all events for a specific incident
+- Audit log table added to Learning Insights tab in Streamlit dashboard
+
+**Multi-cluster registry**
+
+- `multi_cluster/registry.py` — thread-safe registry tracking fleet of K8s clusters
+- `ClusterInfo` dataclass: cluster_id, name, api_url, provider, region, environment, tags
+- `ClusterHealth`: score 0–100, A-F grade, status (healthy/degraded/critical/unknown)
+- Fleet aggregation: average health score, per-status counts, sorted cluster list
+- `GET/POST /api/v1/clusters` — list and register clusters
+- `GET /api/v1/clusters/{id}/health` — per-cluster health
+- `POST /api/v1/clusters/{id}/health` — push health update from cluster agent
+- `POST /api/v1/clusters/{id}/heartbeat` — agent liveness signal
+- `GET /api/v1/fleet/health` — aggregated fleet health
+- Multi-Cluster tab added to Streamlit dashboard with health chart and cluster registration form
+
+**Sidecar auto-injection webhook**
+
+- `webhook/injection.py` — FastAPI MutatingWebhookConfiguration handler
+- Opt-in via pod annotation `ai-sre/enabled: "true"`; no-op if already injected
+- Injects sidecar container, shared EmptyDir volume, and volumeMount via JSON Patch
+- Generates `ai-sre/injected: "true"` annotation to prevent double-injection
+- Helm webhook template (`templates/webhook.yaml`) with Deployment, Service, and MutatingWebhookConfiguration
+
+**Learning outcome ranking API**
+
+- `GET /api/v1/learning/outcomes` — historical success rates per action
+- `POST /api/v1/learning/outcomes` — record a new remediation outcome
+- `GET /api/v1/learning/ranking?incident_type=X` — ranked actions for an incident type
+- Added `OutcomeStore.get_all_stats()` for bulk stats query
+- Added `RemediationRanker.score_step()` for per-step scoring without sorting
+- Learning Insights tab in Streamlit: success rate bar chart, ranking lookup
+
+**APM dashboard enhancements**
+
+- Latency trend chart (p95 per service over time) with 1-second threshold line
+- Error rate area chart per service with 5% threshold line
+- Per-service latency percentile metrics (p50/p95/p99) in service cards
+- APM summary row: total services, healthy/degraded/critical counts, avg error rate
+- Anomaly alerts section in APM tab (live feed from `anomaly/metrics_analyzer.py`)
+
+**Deployment verification**
+
+- `scripts/verify_deployment.sh` — post-install validation script
+- Checks: pod Running state, deployment rollout, API health, KB loaded, detector scan, integration status
+- Colour-coded PASS/FAIL/WARN output; exits non-zero on failures
+- Configurable API URL and namespace as CLI arguments
+
+**Helm values hardening**
+
+- `webhook:` block — `enabled`, `image`, `port`, `certManager`, `failurePolicy`, `namespaceSelector`
+- `integrations:` block — Slack, PagerDuty, Jira config with `existingSecret` support
+- `postgresql:` block — documents PostgreSQL support with `existingSecret`
+- `multiCluster:` block — `mode` (standalone/control-plane/cluster-agent), `controlPlaneUrl`, `pushInterval`
+
+**Streamlit dashboard**
+
+- Added Tab 9: **Learning Insights** — outcome success rate chart, action ranking, audit log table
+- Added Tab 10: **Multi-Cluster** — fleet health chart, per-cluster status cards, cluster registration form
+- Dashboard now has 10 tabs (was 8)
+
+---
+
 ## [0.2.0] — 2026-04-16
 
 ### Added

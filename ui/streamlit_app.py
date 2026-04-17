@@ -195,7 +195,7 @@ st.markdown("---")
 # Tabs
 # ---------------------------------------------------------------------------
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(
     [
         "⚡ Live Incidents",
         "🧠 RCA Analysis",
@@ -205,6 +205,8 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
         "🔍 Cluster Scan",
         "📖 Knowledge Base",
         "🧪 Learning & Feedback",
+        "📈 Learning Insights",
+        "🌐 Multi-Cluster",
     ]
 )
 
@@ -481,13 +483,109 @@ with tab3:
 with tab4:
     st.markdown("### 📊 Application Performance Monitoring")
 
-    apm_ns = st.text_input("Namespace filter", "", key="apm_ns_filter")
+    apm_col1, apm_col2 = st.columns([3, 1])
+    apm_ns = apm_col1.text_input("Namespace filter", "", key="apm_ns_filter")
+    apm_auto_refresh = apm_col2.checkbox("Auto-refresh", value=False, key="apm_refresh")
+
     apm_params = f"?namespace={apm_ns}" if apm_ns else ""
     apm_data = api_get(f"/api/v1/apm/services{apm_params}")
 
+    # ── Summary metrics row ──────────────────────────────────────────────
     if apm_data:
-        st.markdown(f"**{len(apm_data)} service(s) reporting**")
-        for svc in apm_data:
+        total_svcs = len(apm_data)
+        healthy = sum(1 for s in apm_data if s.get("health_score", 0) > 80)
+        degraded = sum(1 for s in apm_data if 50 < s.get("health_score", 0) <= 80)
+        critical_svcs = total_svcs - healthy - degraded
+        avg_err = sum(s.get("error_rate", 0) for s in apm_data) / max(total_svcs, 1)
+
+        mm1, mm2, mm3, mm4, mm5 = st.columns(5)
+        mm1.metric("Services", total_svcs)
+        mm2.metric("Healthy", healthy, delta=None)
+        mm3.metric("Degraded", degraded)
+        mm4.metric("Critical", critical_svcs)
+        mm5.metric("Avg Error Rate", f"{avg_err:.1%}")
+
+        st.markdown("---")
+
+        # ── Latency chart across services ──────────────────────────────
+        try:
+            import pandas as pd
+            import plotly.express as px
+            import plotly.graph_objects as go
+
+            # Build a DataFrame for latency visualisation
+            latency_rows = []
+            err_rate_rows = []
+            for svc in apm_data:
+                svc_key = f"{svc.get('namespace','?')}/{svc.get('service_name','?')}"
+                detail = api_get(
+                    f"/api/v1/apm/services/{svc.get('service_name', '?')}"
+                    f"?namespace={svc.get('namespace', '')}"
+                ) or {}
+                history = detail.get("report_history", [])
+                if history:
+                    for h in history[-20:]:
+                        ts = h.get("received_at", "")[:19]
+                        metrics = h.get("metrics", {})
+                        latency_rows.append({
+                            "Time": ts,
+                            "Service": svc_key,
+                            "p50 (ms)": metrics.get("latency_p50_ms", 0),
+                            "p95 (ms)": metrics.get("latency_p95_ms", 0),
+                            "p99 (ms)": metrics.get("latency_p99_ms", 0),
+                        })
+                        err_rate_rows.append({
+                            "Time": ts,
+                            "Service": svc_key,
+                            "Error Rate": h.get("error_rate", 0),
+                        })
+
+            if latency_rows:
+                df_lat = pd.DataFrame(latency_rows)
+                st.markdown("#### Latency Trends (p95)")
+                fig_lat = px.line(
+                    df_lat,
+                    x="Time",
+                    y="p95 (ms)",
+                    color="Service",
+                    title="p95 Latency per Service",
+                    markers=True,
+                )
+                fig_lat.add_hline(y=1000, line_dash="dot", line_color="red",
+                                  annotation_text="1s threshold")
+                fig_lat.update_layout(
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    height=300,
+                )
+                st.plotly_chart(fig_lat, use_container_width=True)
+
+            if err_rate_rows:
+                df_err = pd.DataFrame(err_rate_rows)
+                st.markdown("#### Error Rate Trends")
+                fig_err = px.area(
+                    df_err,
+                    x="Time",
+                    y="Error Rate",
+                    color="Service",
+                    title="Error Rate per Service",
+                )
+                fig_err.update_yaxes(tickformat=".0%")
+                fig_err.add_hline(y=0.05, line_dash="dot", line_color="orange",
+                                  annotation_text="5% threshold")
+                fig_err.update_layout(
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    height=280,
+                )
+                st.plotly_chart(fig_err, use_container_width=True)
+
+        except ImportError:
+            pass  # plotly not installed — fall through to table view
+
+        # ── Per-service cards ──────────────────────────────────────────
+        st.markdown("#### Service Health Overview")
+        for svc in sorted(apm_data, key=lambda s: s.get("health_score", 100)):
             health = svc.get("health_score", 0)
             health_icon = "🟢" if health > 80 else ("🟡" if health > 50 else "🔴")
             with st.expander(
@@ -500,22 +598,46 @@ with tab4:
                 sc3.metric("Error Count", svc.get("error_count", 0))
                 sc4.metric("Agent", svc.get("agent_version", "?"))
 
+                # Latency percentiles
+                lm = svc.get("metrics", {})
+                if lm.get("latency_p50_ms") or lm.get("latency_p95_ms"):
+                    lc1, lc2, lc3 = st.columns(3)
+                    lc1.metric("p50 Latency", f"{lm.get('latency_p50_ms', 0):.0f}ms")
+                    lc2.metric("p95 Latency", f"{lm.get('latency_p95_ms', 0):.0f}ms")
+                    lc3.metric("p99 Latency", f"{lm.get('latency_p99_ms', 0):.0f}ms")
+
                 top = svc.get("top_patterns", [])
                 if top:
-                    st.markdown("**Top patterns:** " + ", ".join(f"`{p}`" for p in top))
+                    st.markdown("**Top patterns:** " + ", ".join(f"`{p}`" for p in top[:5]))
                 st.caption(f"Last report: {svc.get('last_report', '?')[:19]}")
 
-                if st.button("🔍 Detail", key=f"apm_detail_{svc.get('service_key', '')}"):
-                    detail = api_get(
-                        f"/api/v1/apm/services/{svc['service_name']}?namespace={svc['namespace']}"
-                    )
-                    if detail:
-                        st.json(detail)
     else:
         st.info(
             "No APM data yet. Deploy the sidecar agent to start monitoring application health. "
             "See docs/sidecar-agent.md for setup."
         )
+
+    # ── Anomaly alerts section ────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### ⚡ Proactive Anomaly Alerts")
+    anomaly_data = api_get(f"/api/v1/anomaly/alerts?limit=20{('&namespace=' + apm_ns) if apm_ns else ''}")
+    if anomaly_data and anomaly_data.get("alerts"):
+        alerts = anomaly_data["alerts"]
+        st.markdown(f"**{len(alerts)} recent alert(s)** — early-warning signals before incidents form")
+        for alert in alerts:
+            sev = alert.get("severity", "warning")
+            icon = "🔴" if sev == "critical" else "🟡"
+            with st.expander(
+                f"{icon} [{sev.upper()}] {alert.get('alert_type', '?')} — "
+                f"{alert.get('namespace', '?')}/{alert.get('service', '?')}"
+            ):
+                st.markdown(f"**Message:** {alert.get('message', '')}")
+                ac1, ac2 = st.columns(2)
+                ac1.metric("Current", f"{alert.get('current_value', 0):.1f}")
+                ac2.metric("Baseline", f"{alert.get('baseline_value', 0):.1f}")
+                st.caption(f"Detected: {alert.get('timestamp', '')[:19]}")
+    else:
+        st.success("No anomalies detected — all services within normal parameters")
 
     st.markdown("---")
     st.markdown("#### 🚨 Error Patterns Across Services")
@@ -963,3 +1085,235 @@ Incident #3: CrashLoop in payments/order-svc → AI says "missing secret" (88% c
             "No learned patterns yet. Submit feedback on analyzed incidents "
             "to start building the learned knowledge base."
         )
+
+# ---------------------------------------------------------------------------
+# Tab 9: Learning Insights
+# ---------------------------------------------------------------------------
+
+with tab9:
+    st.markdown("### 📈 Learning Insights — Remediation Outcome History")
+    st.markdown(
+        "Tracks which remediation actions have historically worked for each incident type. "
+        "The system uses this to rank suggestions for future incidents."
+    )
+
+    # Outcome success rates
+    outcomes_data = api_get("/api/v1/learning/outcomes")
+    if outcomes_data and outcomes_data.get("outcomes"):
+        outcomes = outcomes_data["outcomes"]
+        st.markdown(f"**{len(outcomes)} actions tracked**")
+
+        try:
+            import pandas as pd
+            import plotly.express as px
+
+            df_out = pd.DataFrame([
+                {
+                    "Action": v.get("action", k),
+                    "Success Rate": v.get("success_rate", 0.5),
+                    "Total": v.get("total", 0),
+                    "Successes": v.get("successes", 0),
+                }
+                for k, v in outcomes.items()
+            ])
+            if not df_out.empty:
+                fig_out = px.bar(
+                    df_out.sort_values("Success Rate", ascending=True),
+                    x="Success Rate",
+                    y="Action",
+                    orientation="h",
+                    title="Remediation Success Rate by Action",
+                    color="Success Rate",
+                    color_continuous_scale="RdYlGn",
+                    range_color=[0, 1],
+                    text="Total",
+                )
+                fig_out.add_vline(x=0.5, line_dash="dot", line_color="gray",
+                                  annotation_text="50% neutral prior")
+                fig_out.update_layout(
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    height=max(200, len(df_out) * 35),
+                    showlegend=False,
+                )
+                st.plotly_chart(fig_out, use_container_width=True)
+        except ImportError:
+            for k, v in outcomes.items():
+                st.markdown(
+                    f"- **{k}**: {v.get('success_rate', 0.5):.0%} "
+                    f"({v.get('successes', 0)}/{v.get('total', 0)} successes)"
+                )
+    else:
+        st.info("No outcome data yet. Record remediation results via the API or feedback form.")
+
+    st.markdown("---")
+
+    # Action ranking for a specific incident type
+    st.markdown("#### Ranked Remediations by Incident Type")
+    rank_type = st.text_input(
+        "Incident type to rank", "CrashLoopBackOff", key="rank_incident_type"
+    )
+    if rank_type:
+        ranking = api_get(f"/api/v1/learning/ranking?incident_type={rank_type}")
+        if ranking and ranking.get("ranked_steps"):
+            st.markdown(f"**Top actions for `{rank_type}`:**")
+            for i, step in enumerate(ranking["ranked_steps"], 1):
+                score = step.get("score", 0.5)
+                bar = "█" * int(score * 10) + "░" * (10 - int(score * 10))
+                st.markdown(
+                    f"{i}. `{step.get('action', '?')}` — "
+                    f"score `{score:.2f}` `[{bar}]` ({step.get('safety_level', '?')})"
+                )
+        elif ranking:
+            st.info(f"No history yet for `{rank_type}` — using neutral priors")
+        else:
+            st.warning("Ranking endpoint not reachable")
+
+    st.markdown("---")
+
+    # Audit log section
+    st.markdown("#### 🗂️ Audit Log — Recent Actions")
+    audit_data = api_get("/api/v1/audit/events?limit=50")
+    if audit_data and audit_data.get("events"):
+        events = audit_data["events"]
+        stats = audit_data.get("stats", {})
+
+        sa1, sa2, sa3 = st.columns(3)
+        sa1.metric("Total Events", stats.get("total_events", 0))
+        by_outcome = stats.get("by_outcome", {})
+        sa2.metric("Approved", by_outcome.get("approved", 0))
+        sa3.metric("Blocked", by_outcome.get("blocked", 0))
+
+        try:
+            import pandas as pd
+
+            df_audit = pd.DataFrame([
+                {
+                    "Time": e.get("timestamp", "")[:19],
+                    "Type": e.get("event_type", ""),
+                    "Namespace": e.get("namespace", ""),
+                    "Workload": e.get("workload", ""),
+                    "Action": e.get("action", ""),
+                    "Outcome": e.get("outcome", ""),
+                    "Actor": e.get("actor", ""),
+                    "Risk": f"{e.get('risk_score', 0):.2f}" if e.get("risk_score") else "—",
+                }
+                for e in events
+            ])
+            st.dataframe(df_audit, use_container_width=True)
+        except ImportError:
+            for ev in events[-10:]:
+                st.markdown(
+                    f"- `{ev.get('timestamp','')[:19]}` **{ev.get('event_type','')}** "
+                    f"{ev.get('namespace','')}/{ev.get('workload','')} — "
+                    f"*{ev.get('outcome','')}*"
+                )
+    else:
+        st.info("No audit events yet. Events are recorded when remediations are approved, blocked, or auto-executed.")
+
+# ---------------------------------------------------------------------------
+# Tab 10: Multi-Cluster
+# ---------------------------------------------------------------------------
+
+with tab10:
+    st.markdown("### 🌐 Multi-Cluster Fleet Overview")
+
+    fleet_data = api_get("/api/v1/fleet/health")
+    if fleet_data:
+        total = fleet_data.get("total_clusters", 0)
+        if total == 0:
+            st.info(
+                "No clusters registered yet. Register a cluster via "
+                "`POST /api/v1/clusters` or use the form below."
+            )
+        else:
+            # Fleet summary metrics
+            fc1, fc2, fc3, fc4, fc5 = st.columns(5)
+            fc1.metric("Total Clusters", total)
+            fc2.metric("Healthy", fleet_data.get("healthy", 0))
+            fc3.metric("Degraded", fleet_data.get("degraded", 0))
+            fc4.metric("Critical", fleet_data.get("critical", 0))
+            fc5.metric("Avg Health", f"{fleet_data.get('average_health_score', 0):.0f}/100")
+
+            st.markdown("---")
+
+            # Fleet health chart
+            clusters = fleet_data.get("clusters", [])
+            if clusters:
+                try:
+                    import pandas as pd
+                    import plotly.express as px
+
+                    df_cl = pd.DataFrame(clusters)
+                    fig_cl = px.bar(
+                        df_cl,
+                        x="name",
+                        y="score",
+                        color="status",
+                        title="Cluster Health Scores",
+                        color_discrete_map={
+                            "healthy": "#2EB67D",
+                            "degraded": "#ECB22E",
+                            "critical": "#E01E5A",
+                            "unknown": "#AAAAAA",
+                        },
+                        text="grade",
+                    )
+                    fig_cl.add_hline(y=75, line_dash="dot", line_color="gray",
+                                     annotation_text="healthy threshold")
+                    fig_cl.update_layout(
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        height=300,
+                        showlegend=True,
+                    )
+                    st.plotly_chart(fig_cl, use_container_width=True)
+                except ImportError:
+                    pass
+
+                # Per-cluster table
+                for cluster in clusters:
+                    score = cluster.get("score", 0)
+                    status_icon = "🟢" if cluster.get("status") == "healthy" else (
+                        "🟡" if cluster.get("status") == "degraded" else "🔴"
+                    )
+                    with st.expander(
+                        f"{status_icon} [{cluster.get('grade', '?')}] "
+                        f"{cluster.get('name', cluster.get('cluster_id', '?'))} — "
+                        f"score {score:.0f}/100"
+                    ):
+                        cc1, cc2, cc3 = st.columns(3)
+                        cc1.markdown(f"**Environment:** {cluster.get('environment', '?')}")
+                        cc2.markdown(f"**Last seen:** {(cluster.get('last_seen') or 'never')[:19]}")
+                        cc3.markdown(f"**Incidents:** {cluster.get('incident_count', '?')}")
+
+    st.markdown("---")
+
+    # Register cluster form
+    with st.expander("➕ Register a New Cluster"):
+        rc1, rc2 = st.columns(2)
+        new_cluster_id = rc1.text_input("Cluster ID", placeholder="us-east-1-prod")
+        new_cluster_name = rc2.text_input("Name", placeholder="US East Production")
+        rc3, rc4 = st.columns(2)
+        new_api_url = rc3.text_input("API URL", placeholder="https://sre-operator.us-east-1.internal:8000")
+        new_env = rc4.selectbox("Environment", ["production", "staging", "development", "unknown"])
+        rc5, rc6 = st.columns(2)
+        new_provider = rc5.selectbox("Provider", ["aws", "gcp", "azure", "on-prem", "unknown"])
+        new_region = rc6.text_input("Region", placeholder="us-east-1")
+
+        if st.button("Register Cluster", type="primary"):
+            payload = {
+                "cluster_id": new_cluster_id,
+                "name": new_cluster_name,
+                "api_url": new_api_url,
+                "provider": new_provider,
+                "region": new_region,
+                "environment": new_env,
+                "tags": [],
+            }
+            result = api_post("/api/v1/clusters", payload)
+            if result:
+                st.success(f"Cluster `{new_cluster_id}` registered successfully!")
+                st.rerun()
+            else:
+                st.error("Failed to register cluster — check API logs")

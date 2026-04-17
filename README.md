@@ -46,32 +46,39 @@ This section reflects what is actually implemented, not what is planned.
 - **3-tier remediation safety** — auto-fix / approval-required / suggest-only with dry-run mode, namespace policies, and cooldowns
 - **6 remediation executors** — pod restart, rollout restart, scale, rollback, resource patch, job rerun
 - **Feedback learning loop** — confidence adjustment, pattern promotion, embedding refit
-- **APM sidecar agent** — log tailing, error detection, latency tracking, novel pattern learning
+- **Remediation outcome learning** — `OutcomeStore` + `RemediationRanker` track per-action success rates and re-rank suggestions
+- **APM sidecar agent** — log tailing, error detection, latency tracking (p50/p95/p99), novel pattern learning
 - **APM API endpoints** — `/api/v1/apm/ingest`, `/api/v1/apm/services`, `/api/v1/apm/errors`, `/api/v1/apm/learn`
-- **FastAPI REST** — 29 endpoints with Swagger docs at `/docs`
-- **Streamlit dashboard** — 8 tabs: incidents, RCA, remediation, APM, history, cluster scan, knowledge base, learning stats
+- **Proactive anomaly detection** — `anomaly/metrics_analyzer.py` detects CPU spikes, memory growth, error rate spikes, latency spikes, restart rate anomalies before incidents fire
+- **External integrations** — Slack (Incoming Webhooks), PagerDuty (Events API v2), Jira (REST API v3) — enable via env vars
+- **Audit logging** — `audit/logger.py` writes every remediation approval, block, and auto-execution to a JSON-L audit trail
+- **Multi-cluster registry** — `multi_cluster/registry.py` tracks fleet of clusters with health scores, heartbeats, and aggregation
+- **Sidecar auto-injection webhook** — `webhook/injection.py` FastAPI server for MutatingWebhookConfiguration; Helm template included
+- **Operator control loop** — `sre_loop/` package: continuous observe-detect-analyze-remediate with configurable interval
+- **Incident fingerprinting** — stable MD5 hash for deduplication; Jaccard similarity for near-duplicate grouping
+- **Plan-level guardrails** — `policies/guardrails.py`: protected namespaces, denied actions, risk-score threshold
+- **Confidence breakdown** — 4-dimension confidence: detector, KB match, similar incident, log evidence
+- **Cluster health score** — 0-100 with A-F grade; severity, recurrence, and velocity deductions
+- **Playbook system** — YAML-based structured playbooks for CrashLoop, OOM, Ingress with variable substitution
+- **Simulation engine** — 4 named scenarios (crashloop, oom, ingress-failure, pending-pods) that run real detectors
+- **FastAPI REST** — 60+ endpoints with Swagger docs at `/docs`
+- **Streamlit dashboard** — 10 tabs: incidents, RCA, remediation, APM (with latency/error charts + anomaly alerts), history, cluster scan, knowledge base, learning & feedback, learning insights, multi-cluster
 - **Click CLI** — `ai-sre cluster scan`, `incidents list`, `incident analyze`, `remediation plan/execute`, `simulate`, `knowledge search`
-- **SQLite persistence** — incidents, feedback, learned patterns (PostgreSQL ready for production)
-- **Helm chart** — EKS, AKS, GKE, and local; pre-built demo and production values
+- **SQLite persistence** — incidents, feedback, learned patterns (PostgreSQL ready via `DATABASE_URL`)
+- **Helm chart** — EKS, AKS, GKE, and local; pre-built demo and production values; webhook template; integrations config
 - **Auto cloud-provider detection** — from node `spec.providerID` and labels at startup
 - **202 passing tests** — unit tests, API tests, integration tests with Kind
 - **GitHub Actions CI** — lint, test, smoke, helm-lint, Kind integration
-
-### In progress
-
-- APM dashboard tab (UI exists, chart visualisations not yet wired)
-- Sidecar agent auto-injection via MutatingWebhookConfiguration (requires Helm webhook template)
-- APM traces correlation with K8s events
+- **Deployment verification** — `scripts/verify_deployment.sh` post-install health check
 
 ### Planned (not yet implemented)
 
-- Time-series anomaly detection on cluster metrics
+- Multi-cluster incident correlation across cluster boundaries
 - Proactive failure prediction ("this deployment will OOMKill in ~15 minutes")
-- Multi-cluster federation
-- Slack/PagerDuty/Jira integrations
-- PostgreSQL backend for multi-replica API
+- PostgreSQL pgvector embeddings for semantic similarity at scale
 - Fine-tuned model on accumulated incident history
 - SLO tracking and error budget burn rate
+- APM trace-to-K8s-event correlation (currently APM and K8s events are separate)
 
 ---
 
