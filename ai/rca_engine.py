@@ -151,6 +151,18 @@ class RCAEngine:
         incident.root_cause = analysis.get("root_cause", "Root cause undetermined")
         incident.confidence = float(analysis.get("confidence", 0.5))
 
+        # Store explainable "Why Not X" alternatives in raw_signals for API/UI access
+        alternatives_rejected = analysis.get("alternatives_rejected", [])
+        if alternatives_rejected and isinstance(alternatives_rejected, list):
+            if incident.raw_signals is None:
+                incident.raw_signals = {}
+            incident.raw_signals["alternatives_rejected"] = alternatives_rejected
+            logger.debug(
+                "Explainable RCA: %d alternatives rejected for incident %s",
+                len(alternatives_rejected),
+                incident.id,
+            )
+
         # Adjust confidence based on feedback history for this pattern
         try:
             from knowledge.feedback_loop import LearningLoop

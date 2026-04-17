@@ -1,0 +1,185 @@
+# Playbook: CrashLoopBackOff remediation
+# Covers the three most common root causes: missing secret/configmap,
+# OOMKill, and bad health check configuration.
+
+- id: crashloop-missing-secret
+  name: "CrashLoopBackOff — Missing Secret or ConfigMap"
+  description: >
+    Pod is crashing immediately on startup because a referenced Secret or ConfigMap
+    does not exist in the namespace. The container exits before becoming ready.
+  trigger_types:
+    - CrashLoopBackOff
+  conditions:
+    - "secret not found"
+    - "configmap not found"
+    - "envfrom"
+    - "missing secret"
+  safety_level: approval_required
+  estimated_duration_secs: 90
+  tags:
+    - crashloop
+    - secret
+    - configmap
+    - startup
+  steps:
+    - id: identify-missing-resource
+      name: "Identify the missing Secret or ConfigMap name"
+      command: "kubectl describe pod {pod_name} -n {namespace} | grep -A5 'Error\\|Warning\\|secret\\|configmap'"
+      check: "Look for 'secret not found' or 'configmap not found' in Events section"
+      notes: "The missing resource name is in the error: 'secret \"<name>\" not found'"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: stop
+
+    - id: check-existing-secrets
+      name: "List existing Secrets in the namespace"
+      command: "kubectl get secrets -n {namespace}"
+      check: "Confirm whether the required secret exists with the correct name"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: create-secret
+      name: "Create the missing Secret"
+      command: "kubectl create secret generic {secret_name} --from-literal=key=value -n {namespace}"
+      check: "kubectl get secret {secret_name} -n {namespace}"
+      notes: "Replace 'key=value' with the actual required key-value pairs. Check app documentation."
+      safety_level: approval_required
+      reversible: true
+      on_failure: stop
+
+    - id: restart-deployment
+      name: "Restart the deployment to pick up the new Secret"
+      command: "kubectl rollout restart deployment/{workload} -n {namespace}"
+      check: "kubectl rollout status deployment/{workload} -n {namespace}"
+      notes: "Verify pods reach Running state within 2 minutes"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: rollback
+
+    - id: verify-recovery
+      name: "Verify pods are running and not restarting"
+      command: "kubectl get pods -n {namespace} -l app={workload} -w"
+      check: "All pods should show STATUS=Running, RESTARTS=0"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: stop
+
+  rollback_steps:
+    - id: rollback-deployment
+      name: "Rollback deployment to previous revision"
+      command: "kubectl rollout undo deployment/{workload} -n {namespace}"
+      safety_level: approval_required
+
+- id: crashloop-oom
+  name: "CrashLoopBackOff — OOMKilled (memory limit too low)"
+  description: >
+    Pod is killed by the kernel OOM killer because it exceeded its memory limit.
+    The container restarts and is killed again, creating a CrashLoop.
+  trigger_types:
+    - CrashLoopBackOff
+    - OOMKilled
+  conditions:
+    - "oomkilled"
+    - "exit code 137"
+    - "out of memory"
+    - "memory limit"
+  safety_level: approval_required
+  estimated_duration_secs: 180
+  tags:
+    - crashloop
+    - oom
+    - memory
+    - resources
+  steps:
+    - id: check-memory-usage
+      name: "Check current memory consumption"
+      command: "kubectl top pod -n {namespace} -l app={workload}"
+      check: "Note the actual memory usage to determine appropriate limit"
+      notes: "If kubectl top returns no data, check Prometheus for historical memory usage"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: check-current-limits
+      name: "Show current resource limits"
+      command: "kubectl get deployment {workload} -n {namespace} -o jsonpath='{.spec.template.spec.containers[*].resources}'"
+      check: "Note the current limits.memory value"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: patch-memory-limit
+      name: "Increase memory limit by 50%"
+      command: "kubectl patch deployment {workload} -n {namespace} --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/resources/limits/memory\",\"value\":\"{new_memory_limit}\"}]'"
+      check: "kubectl describe pod -l app={workload} -n {namespace} | grep -A3 Limits"
+      notes: "Set new_memory_limit to 1.5x current limit (e.g. 512Mi → 768Mi). Patch should be reviewed before applying."
+      safety_level: approval_required
+      reversible: true
+      on_failure: rollback
+
+    - id: verify-no-oom
+      name: "Watch for OOMKill events after patch"
+      command: "kubectl get events -n {namespace} --field-selector reason=OOMKilling -w"
+      check: "No new OOMKilling events should appear after the patch"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: rollback
+
+  rollback_steps:
+    - id: restore-original-limits
+      name: "Restore original memory limits"
+      command: "kubectl rollout undo deployment/{workload} -n {namespace}"
+      safety_level: approval_required
+
+- id: crashloop-bad-probe
+  name: "CrashLoopBackOff — Bad Liveness Probe"
+  description: >
+    The liveness probe is mis-configured: wrong path, wrong port, or threshold
+    too aggressive. Kubernetes kills the pod before it has finished starting up.
+  trigger_types:
+    - CrashLoopBackOff
+    - ProbeFailure
+  conditions:
+    - "liveness probe failed"
+    - "readiness probe failed"
+    - "probe"
+    - "health check"
+  safety_level: approval_required
+  estimated_duration_secs: 120
+  tags:
+    - crashloop
+    - probe
+    - liveness
+    - readiness
+  steps:
+    - id: show-probe-config
+      name: "Show current probe configuration"
+      command: "kubectl get deployment {workload} -n {namespace} -o jsonpath='{.spec.template.spec.containers[*].livenessProbe}'"
+      check: "Check path, port, initialDelaySeconds, periodSeconds, failureThreshold"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: check-probe-events
+      name: "Show probe failure events"
+      command: "kubectl describe pod {pod_name} -n {namespace} | grep -A5 'Liveness\\|Readiness'"
+      check: "Identify: wrong path? wrong port? too short initialDelaySeconds?"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: patch-probe-delay
+      name: "Increase initialDelaySeconds to give app more startup time"
+      command: "kubectl patch deployment {workload} -n {namespace} --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/livenessProbe/initialDelaySeconds\",\"value\":60}]'"
+      check: "kubectl rollout status deployment/{workload} -n {namespace}"
+      notes: "60s initial delay is a safe starting point for most Java/JVM applications"
+      safety_level: approval_required
+      reversible: true
+      on_failure: rollback
+
+  rollback_steps:
+    - id: restore-probe-config
+      name: "Rollback deployment to restore previous probe configuration"
+      command: "kubectl rollout undo deployment/{workload} -n {namespace}"
+      safety_level: approval_required

@@ -1,0 +1,134 @@
+# Playbook: OOMKill remediation
+
+- id: oomkill-increase-limits
+  name: "OOMKilled — Increase Memory Limits"
+  description: >
+    Container is being killed by the Linux OOM killer because its memory
+    consumption exceeds the configured limits.memory. The fix is to increase
+    limits while investigating the root cause of the memory growth.
+  trigger_types:
+    - OOMKilled
+  conditions:
+    - "oomkilled"
+    - "exit code 137"
+    - "memory limit"
+    - "out of memory"
+  safety_level: approval_required
+  estimated_duration_secs: 240
+  tags:
+    - oom
+    - memory
+    - resources
+    - limits
+  steps:
+    - id: get-current-memory-usage
+      name: "Get current and historical memory usage"
+      command: "kubectl top pod -l app={workload} -n {namespace} --containers"
+      check: "Note peak memory usage to determine the correct new limit"
+      notes: "If kubectl top has no data, check Prometheus: container_memory_working_set_bytes"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: get-current-limits
+      name: "Show current resource limits and requests"
+      command: "kubectl get deployment {workload} -n {namespace} -o jsonpath='{.spec.template.spec.containers[*].resources}'"
+      check: "Note limits.memory and requests.memory for comparison"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: check-oom-events
+      name: "Check OOMKill event history"
+      command: "kubectl get events -n {namespace} --field-selector reason=OOMKilling --sort-by='.lastTimestamp'"
+      check: "Count how many OOMKills occurred and when. Frequent OOMKills = chronic issue."
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: increase-memory-limit
+      name: "Increase memory limit by 50%"
+      command: "kubectl set resources deployment/{workload} -n {namespace} --limits=memory={new_memory_limit}"
+      check: "kubectl rollout status deployment/{workload} -n {namespace}"
+      notes: >
+        Set new_memory_limit to 1.5x the observed peak (round up to nearest 128Mi).
+        Example: peak=400Mi → new limit=640Mi.
+        Do NOT set limits lower than requests.memory.
+      safety_level: approval_required
+      reversible: true
+      on_failure: rollback
+
+    - id: watch-for-oom-recurrence
+      name: "Monitor for OOMKill recurrence"
+      command: "kubectl get events -n {namespace} --field-selector reason=OOMKilling -w"
+      check: "No new OOMKilling events for 10 minutes = fix successful"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: rollback
+
+    - id: investigate-memory-leak
+      name: "Investigate potential memory leak"
+      command: "kubectl exec -it {pod_name} -n {namespace} -- /bin/sh -c 'cat /proc/meminfo || free -h'"
+      check: "Look for steady memory growth pattern — may indicate a leak requiring a code fix"
+      notes: >
+        If memory grows unboundedly over time (not just high baseline), this is a memory leak.
+        A temporary limit increase buys time, but the leak must be fixed in the application code.
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+  rollback_steps:
+    - id: restore-memory-limits
+      name: "Restore original memory limits"
+      command: "kubectl rollout undo deployment/{workload} -n {namespace}"
+      safety_level: approval_required
+
+- id: oomkill-memory-leak
+  name: "OOMKilled — Memory Leak Investigation"
+  description: >
+    Container memory grows continuously over time and eventually hits the limit.
+    This indicates a memory leak in the application code. Immediate fix is to
+    increase limits and add periodic restarts; long-term fix requires a code change.
+  trigger_types:
+    - OOMKilled
+  conditions:
+    - "memory leak"
+    - "heap"
+    - "gc"
+    - "growing"
+  safety_level: suggest_only
+  estimated_duration_secs: 600
+  tags:
+    - oom
+    - memory
+    - leak
+    - application
+  steps:
+    - id: collect-heap-dump
+      name: "Collect a heap dump for analysis (Java)"
+      command: "kubectl exec {pod_name} -n {namespace} -- jmap -dump:format=b,file=/tmp/heap.hprof 1 && kubectl cp {namespace}/{pod_name}:/tmp/heap.hprof ./heap.hprof"
+      check: "File heap.hprof should be present locally after this command"
+      notes: "For Python: py-spy dump, for Go: pprof endpoint. Adapt as needed."
+      safety_level: suggest_only
+      reversible: true
+      on_failure: continue
+
+    - id: temporary-increase-limits
+      name: "Temporarily increase limits to avoid immediate OOMKill during investigation"
+      command: "kubectl set resources deployment/{workload} -n {namespace} --limits=memory={new_memory_limit}"
+      check: "Confirm deployment rolled out successfully"
+      notes: "This is a temporary mitigation only — a code fix is required"
+      safety_level: approval_required
+      reversible: true
+      on_failure: continue
+
+    - id: enable-restart-policy
+      name: "Add a scheduled restart to mitigate leak impact"
+      command: "# Consider adding a CronJob or using Kubernetes pod disruption budget for scheduled restarts"
+      check: "Not a kubectl command — document the restart schedule in a CronJob"
+      notes: "Periodic restarts are a band-aid, not a fix. File a bug for the memory leak."
+      safety_level: suggest_only
+      reversible: true
+      on_failure: continue
+
+  rollback_steps: []

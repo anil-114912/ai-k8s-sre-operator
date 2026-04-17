@@ -1240,3 +1240,353 @@ async def apm_learn(request: APMLearnRequest) -> Dict[str, Any]:
         request.service_name,
     )
     return {"accepted": True, "lines_captured": captured}
+
+
+# ---------------------------------------------------------------------------
+# Operator control loop
+# ---------------------------------------------------------------------------
+
+_operator_scheduler: Optional[Any] = None
+_operator_cycle_results: List[Dict[str, Any]] = []
+
+
+@app.get("/api/v1/operator/status")
+async def operator_status() -> Dict[str, Any]:
+    """Return the current state of the continuous operator control loop."""
+    if _operator_scheduler is None:
+        return {
+            "running": False,
+            "message": "Operator loop not started. POST /api/v1/operator/start to begin.",
+        }
+    return _operator_scheduler.get_status()
+
+
+@app.post("/api/v1/operator/start")
+async def operator_start(
+    interval_secs: int = Query(30, ge=10, le=300, description="Cycle interval in seconds"),
+    auto_remediate: bool = Query(False, description="Enable L1 auto-fix remediations"),
+    namespace: str = Query("", description="Restrict to a single namespace (empty = all)"),
+) -> Dict[str, Any]:
+    """Start the continuous operator loop in a background thread."""
+    global _operator_scheduler
+    from sre_loop.scheduler import OperatorScheduler
+
+    if _operator_scheduler and _operator_scheduler.is_running():
+        return {"started": False, "message": "Operator loop is already running"}
+
+    def _on_cycle(result: Dict[str, Any]) -> None:
+        _operator_cycle_results.append(result)
+        if len(_operator_cycle_results) > 100:
+            _operator_cycle_results.pop(0)
+
+    _operator_scheduler = OperatorScheduler(
+        interval_secs=interval_secs,
+        demo_mode=None,  # inherits DEMO_MODE env var
+        auto_remediate=auto_remediate,
+        namespace_filter=namespace,
+        on_cycle_complete=_on_cycle,
+    )
+    _operator_scheduler.start_background()
+    logger.info(
+        "Operator loop started via API: interval=%ds auto_remediate=%s",
+        interval_secs,
+        auto_remediate,
+    )
+    return {
+        "started": True,
+        "interval_secs": interval_secs,
+        "auto_remediate": auto_remediate,
+        "namespace_filter": namespace or "all",
+    }
+
+
+@app.post("/api/v1/operator/stop")
+async def operator_stop() -> Dict[str, Any]:
+    """Stop the continuous operator loop."""
+    global _operator_scheduler
+    if _operator_scheduler is None or not _operator_scheduler.is_running():
+        return {"stopped": False, "message": "Operator loop is not running"}
+    _operator_scheduler.stop()
+    logger.info("Operator loop stopped via API")
+    return {"stopped": True}
+
+
+@app.get("/api/v1/operator/cycles")
+async def operator_cycles(limit: int = Query(20, ge=1, le=100)) -> List[Dict[str, Any]]:
+    """Return the most recent operator cycle results."""
+    return _operator_cycle_results[-limit:]
+
+
+# ---------------------------------------------------------------------------
+# Cluster health score
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/health-score")
+async def cluster_health_score() -> Dict[str, Any]:
+    """Compute and return the current cluster health score (0-100).
+
+    Score is based on active incident count, severity distribution,
+    recurrence of failure types, and recent incident velocity.
+    """
+    from metrics.health_score import ClusterHealthScorer
+
+    scorer = ClusterHealthScorer()
+    all_incidents = list(_incidents.values())
+    health = scorer.compute(incidents=all_incidents)
+    logger.info("Health score computed: %d (%s)", health.score, health.grade)
+    return health.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Incident fingerprint
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/incidents/{incident_id}/fingerprint")
+async def incident_fingerprint(incident_id: str) -> Dict[str, Any]:
+    """Return the deduplication fingerprint for an incident.
+
+    The fingerprint is a stable hash of (incident type, workload, primary error).
+    Incidents with the same fingerprint are the same failure on the same resource.
+    """
+    incident = _incidents.get(incident_id) or _store.get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+
+    from knowledge.fingerprint import IncidentFingerprinter
+
+    fp = IncidentFingerprinter()
+    events = incident.raw_signals.get("events", []) if incident.raw_signals else []
+    error_msgs = [e.content for e in (incident.evidence or [])[:5]]
+    fingerprint = fp.compute(
+        events=events,
+        resource=incident.workload or "",
+        error_messages=error_msgs,
+        incident_type=incident.incident_type.value,
+        namespace=incident.namespace,
+    )
+    # Also extract alternatives_rejected if RCA was run
+    alternatives = (incident.raw_signals or {}).get("alternatives_rejected", [])
+    return {
+        "incident_id": incident_id,
+        "fingerprint": fingerprint,
+        "namespace": incident.namespace,
+        "workload": incident.workload,
+        "incident_type": incident.incident_type.value,
+        "alternatives_rejected": alternatives,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Playbooks
+# ---------------------------------------------------------------------------
+
+_playbook_loader: Optional[Any] = None
+
+
+def _get_playbook_loader() -> Any:
+    global _playbook_loader
+    if _playbook_loader is None:
+        from playbooks.loader import PlaybookLoader
+
+        _playbook_loader = PlaybookLoader()
+        _playbook_loader.load()
+    return _playbook_loader
+
+
+@app.get("/api/v1/playbooks")
+async def list_playbooks(
+    incident_type: str = Query("", description="Filter by incident type"),
+) -> List[Dict[str, Any]]:
+    """List all available remediation playbooks."""
+    loader = _get_playbook_loader()
+    if incident_type:
+        playbooks = loader.get_for_type(incident_type)
+    else:
+        playbooks = loader.list_all()
+    return [pb.to_dict() for pb in playbooks]
+
+
+@app.get("/api/v1/playbooks/{playbook_id}")
+async def get_playbook(playbook_id: str) -> Dict[str, Any]:
+    """Return a specific playbook by ID."""
+    loader = _get_playbook_loader()
+    pb = loader.get_by_id(playbook_id)
+    if not pb:
+        raise HTTPException(status_code=404, detail=f"Playbook '{playbook_id}' not found")
+    return pb.to_dict()
+
+
+@app.get("/api/v1/incidents/{incident_id}/playbooks")
+async def incident_playbooks(incident_id: str) -> List[Dict[str, Any]]:
+    """Return playbooks applicable to a specific incident."""
+    incident = _incidents.get(incident_id) or _store.get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+
+    loader = _get_playbook_loader()
+    applicable = loader.get_for_type(
+        incident_type=incident.incident_type.value,
+        root_cause=incident.root_cause or "",
+    )
+    return [pb.to_dict() for pb in applicable]
+
+
+# ---------------------------------------------------------------------------
+# Simulation
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/v1/simulate/{scenario}")
+async def simulate_scenario(
+    scenario: str,
+    namespace: str = Query("simulation", description="Namespace for generated data"),
+    workload: str = Query("demo-app", description="Workload name for generated data"),
+    run_detection: bool = Query(True, description="Run detectors on the generated state"),
+) -> Dict[str, Any]:
+    """Run a named simulation scenario and optionally detect incidents from it.
+
+    Scenarios: crashloop, oom, pending, ingress.
+    """
+    from simulation.engine import SimulationEngine
+
+    engine = SimulationEngine()
+    try:
+        cluster_state = engine.run(scenario, namespace=namespace, workload=workload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    result: Dict[str, Any] = {
+        "scenario": scenario,
+        "namespace": namespace,
+        "workload": workload,
+        "pods_generated": len(cluster_state.get("pods", [])),
+        "events_generated": len(cluster_state.get("events", [])),
+    }
+
+    if run_detection:
+        from detectors import run_all_detectors
+
+        detections = run_all_detectors(cluster_state)
+        result["detections"] = [
+            {
+                "incident_type": d.incident_type,
+                "severity": d.severity,
+                "reason": d.reason,
+                "namespace": d.namespace,
+                "workload": d.workload,
+            }
+            for d in detections
+            if d.detected
+        ]
+        result["detection_count"] = len(result["detections"])
+
+    return result
+
+
+@app.get("/api/v1/simulate/scenarios")
+async def list_simulation_scenarios() -> Dict[str, Any]:
+    """List all available simulation scenarios."""
+    from simulation.engine import SimulationEngine
+
+    engine = SimulationEngine()
+    return {
+        "scenarios": engine.list_scenarios(),
+        "usage": "POST /api/v1/simulate/{scenario}?namespace=test&workload=my-app",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Confidence breakdown
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/incidents/{incident_id}/confidence")
+async def incident_confidence_breakdown(incident_id: str) -> Dict[str, Any]:
+    """Return a detailed confidence breakdown for a fully analyzed incident.
+
+    Breaks the overall score into:
+      - detector_confidence: how strongly the detector fired
+      - kb_match_strength: top KB pattern match score
+      - similar_incident_match: resolved past incidents
+      - log_evidence_strength: clarity of pod logs
+    """
+    incident = _incidents.get(incident_id) or _store.get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+    if not incident.root_cause:
+        raise HTTPException(
+            status_code=400,
+            detail="Incident has not been analyzed yet. POST /analyze first.",
+        )
+
+    from ai.confidence import ConfidenceCalculator
+
+    calc = ConfidenceCalculator()
+    # Retrieve KB results if available in raw_signals
+    kb_results = (incident.raw_signals or {}).get("kb_matches", [])
+    similar = [
+        {"resolved": True, "root_cause": s}
+        for s in (incident.similar_past_incidents or [])
+    ]
+    breakdown = calc.compute(
+        incident=incident,
+        kb_results=kb_results,
+        similar_incidents=similar,
+    )
+    return {
+        "incident_id": incident_id,
+        "overall_confidence": incident.confidence,
+        "breakdown": breakdown.to_dict(),
+        "alternatives_rejected": (incident.raw_signals or {}).get("alternatives_rejected", []),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Guardrails evaluation
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/incidents/{incident_id}/guardrails")
+async def evaluate_guardrails(incident_id: str) -> Dict[str, Any]:
+    """Evaluate the remediation plan for an incident against all guardrails.
+
+    Returns per-step decisions (allowed / blocked / requires_approval),
+    an overall risk score, and a structured audit log.
+    """
+    incident = _incidents.get(incident_id) or _store.get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+
+    plan = _plans.get(incident_id)
+    if not plan:
+        raise HTTPException(
+            status_code=404,
+            detail="No remediation plan found. GET /remediation first.",
+        )
+
+    from policies.guardrails import GuardrailsEngine
+
+    engine = GuardrailsEngine()
+    decision = engine.evaluate_plan(plan=plan, incident=incident)
+    return {
+        "incident_id": incident_id,
+        "plan_id": str(plan.id),
+        "overall_allowed": decision.overall_allowed,
+        "overall_requires_approval": decision.overall_requires_approval,
+        "risk_score": decision.risk_score,
+        "blocked_steps": decision.blocked_steps,
+        "step_decisions": [
+            {
+                "action": sd.action,
+                "allowed": sd.allowed,
+                "requires_approval": sd.requires_approval,
+                "risk_score": sd.risk_score,
+                "blocked_reason": sd.blocked_reason,
+            }
+            for sd in decision.step_decisions
+        ],
+        "audit_log": decision.audit_log,
+        "evaluated_at": decision.evaluated_at,
+    }

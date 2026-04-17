@@ -1,0 +1,128 @@
+# Playbook: Ingress and Service failure remediation
+
+- id: ingress-backend-missing
+  name: "Ingress 502/503 — Backend Service Missing"
+  description: >
+    Ingress controller returns 502/503 because the backend Service does not exist,
+    has no endpoints, or the port reference is wrong.
+  trigger_types:
+    - IngressFailure
+    - ServiceMismatch
+  conditions:
+    - "no endpoints"
+    - "service not found"
+    - "backend"
+    - "502"
+    - "503"
+  safety_level: approval_required
+  estimated_duration_secs: 120
+  tags:
+    - ingress
+    - service
+    - backend
+    - networking
+  steps:
+    - id: check-ingress-config
+      name: "Show Ingress backend configuration"
+      command: "kubectl get ingress -n {namespace} -o yaml | grep -A10 'backend\\|serviceName\\|servicePort'"
+      check: "Note the service name and port referenced in the Ingress spec"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: verify-service-exists
+      name: "Check if the backend Service exists"
+      command: "kubectl get service -n {namespace}"
+      check: "The service name referenced in the Ingress must appear in this list"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: check-endpoints
+      name: "Check Service endpoints"
+      command: "kubectl get endpoints {workload} -n {namespace}"
+      check: "Endpoints should show pod IPs. If empty (notReadyAddresses only), selector is wrong."
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: check-selector-match
+      name: "Compare Service selector vs Pod labels"
+      command: "kubectl get service {workload} -n {namespace} -o jsonpath='{.spec.selector}' && kubectl get pods -n {namespace} --show-labels"
+      check: "Service selector labels must exactly match pod labels"
+      notes: "A common mistake: selector uses 'app: payment-api' but pods have 'app.kubernetes.io/name: payment-api'"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: patch-service-selector
+      name: "Patch Service selector to match pod labels"
+      command: "kubectl patch service {workload} -n {namespace} --type=merge -p '{\"spec\":{\"selector\":{\"app\":\"{workload}\"}}}'"
+      check: "kubectl get endpoints {workload} -n {namespace} — should now show pod IPs"
+      notes: "Update the selector key/value to match actual pod labels before running"
+      safety_level: approval_required
+      reversible: true
+      on_failure: rollback
+
+    - id: test-ingress
+      name: "Test the Ingress endpoint"
+      command: "curl -v http://{ingress_host}/{path} -o /dev/null -s -w '%{http_code}'"
+      check: "Should return 200 or the application's expected status code"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+  rollback_steps:
+    - id: restore-selector
+      name: "Restore original Service selector"
+      command: "kubectl patch service {workload} -n {namespace} --type=merge -p '{\"spec\":{\"selector\":{\"app\":\"{original_app_label}\"}}}'"
+      safety_level: approval_required
+
+- id: ingress-tls-cert-expired
+  name: "Ingress — TLS Certificate Expired"
+  description: >
+    Ingress TLS certificate has expired or is about to expire, causing
+    browser SSL errors and failed health checks.
+  trigger_types:
+    - IngressFailure
+  conditions:
+    - "certificate"
+    - "tls"
+    - "ssl"
+    - "expired"
+    - "x509"
+  safety_level: approval_required
+  estimated_duration_secs: 300
+  tags:
+    - ingress
+    - tls
+    - certificate
+    - security
+  steps:
+    - id: check-cert-expiry
+      name: "Check certificate expiry date"
+      command: "kubectl get secret -n {namespace} -o json | jq '.items[] | select(.type==\"kubernetes.io/tls\") | .metadata.name'"
+      check: "Identify the TLS secret used by the Ingress"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: check-cert-manager
+      name: "Check if cert-manager is managing this certificate"
+      command: "kubectl get certificate,certificaterequest -n {namespace}"
+      check: "If cert-manager manages it, check Certificate resource for READY=True"
+      notes: "If cert-manager, check: kubectl describe certificate <name> -n <namespace>"
+      safety_level: auto_fix
+      reversible: true
+      on_failure: continue
+
+    - id: renew-certificate
+      name: "Trigger cert-manager certificate renewal"
+      command: "kubectl annotate certificate {cert_name} -n {namespace} cert-manager.io/issue-temporary-certificate=true --overwrite"
+      check: "kubectl get certificate {cert_name} -n {namespace} -w — wait for READY=True"
+      notes: "Only if cert-manager is in use. Otherwise renew via your certificate provider."
+      safety_level: approval_required
+      reversible: true
+      on_failure: stop
+
+  rollback_steps: []

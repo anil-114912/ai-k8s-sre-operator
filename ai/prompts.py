@@ -14,7 +14,15 @@ You reason in a structured, evidence-based manner. You:
 2. Classify each signal as: root_cause | contributing_factor | symptom
 3. Identify the most likely root cause with a confidence percentage
 4. Provide a clear, actionable explanation in plain English
-5. List 1-3 alternative hypotheses if the root cause is uncertain
+5. List 1-3 alternative hypotheses and explicitly state WHY each was rejected
+
+For the "alternatives_rejected" field, follow this format for each entry:
+  "hypothesis": "<what it could have been>",
+  "rejected_because": "<specific evidence that rules it out>"
+
+Example:
+  hypothesis: "ImagePullBackOff", rejected_because: "No ImagePull events found; image was pulled successfully"
+  hypothesis: "Network policy blocking", rejected_because: "Service endpoints are reachable; no NetworkPolicy denial events"
 
 Always format your response as structured JSON."""
 
@@ -60,7 +68,10 @@ Please provide a JSON response with this exact structure:
   "confidence": 0.XX,  // float 0-1
   "explanation": "2-3 paragraph plain English explanation of what happened and why",
   "contributing_factors": ["factor1", "factor2"],
-  "alternative_hypotheses": ["hypothesis1", "hypothesis2"],
+  "alternatives_rejected": [
+    {{"hypothesis": "What it could have been", "rejected_because": "Specific evidence that rules it out"}},
+    {{"hypothesis": "Another possibility", "rejected_because": "Why this doesn't match the evidence"}}
+  ],
   "suggested_fix": "Specific actionable fix recommendation",
   "severity_justification": "Why this severity level is appropriate"
 }}
