@@ -116,7 +116,6 @@ class PatternLearner:
         return {
             "buffered_novel_lines": len(self._buffer),
             "top_patterns": [
-                {"line": line[:100], "count": count}
-                for line, count in self._freq.most_common(5)
+                {"line": line[:100], "count": count} for line, count in self._freq.most_common(5)
             ],
         }

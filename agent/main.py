@@ -22,7 +22,7 @@ import time
 
 from agent.config import AgentConfig
 from agent.error_detector import ErrorDetector
-from agent.log_tailer import LogTailer, MultiLogTailer
+from agent.log_tailer import LogTailer
 from agent.metrics_reporter import MetricsReporter
 from agent.pattern_learner import PatternLearner
 

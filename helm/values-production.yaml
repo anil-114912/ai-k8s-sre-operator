@@ -1,0 +1,205 @@
+## Production values — hardened configuration for real cluster deployments.
+##
+## Prerequisites:
+##   1. A storage class that supports ReadWriteOnce (or use PostgreSQL — see database section)
+##   2. An LLM API key stored in a Kubernetes Secret (see llm section)
+##   3. Prometheus available in-cluster (optional but recommended)
+##
+## Install:
+##   kubectl create secret generic sre-llm-key \
+##     --from-literal=LLM_API_KEY=$ANTHROPIC_API_KEY \
+##     -n ai-sre
+##
+##   helm install ai-sre-operator ./helm/ai-k8s-sre-operator \
+##     --namespace ai-sre --create-namespace \
+##     --values helm/values-production.yaml
+
+## ─────────────────────────────────────────────────────────
+## LLM Configuration
+## ─────────────────────────────────────────────────────────
+## Reference an existing Secret instead of passing the key as a value.
+## Secret must contain the key LLM_API_KEY.
+llm:
+  provider: anthropic       # anthropic | openai | rule-based
+  existingSecret: sre-llm-key
+  apiKey: ""                # Leave empty — use existingSecret in production
+
+## ─────────────────────────────────────────────────────────
+## Cluster / Cloud Provider
+## ─────────────────────────────────────────────────────────
+## Set explicitly for faster startup (skips auto-detection).
+## Boosts cloud-specific KB patterns automatically.
+##
+## Uncomment ONE of these:
+# cluster:
+#   provider: aws       # EKS
+# cluster:
+#   provider: azure     # AKS
+# cluster:
+#   provider: gcp       # GKE
+cluster:
+  provider: ""          # empty = auto-detect from node labels
+
+## ─────────────────────────────────────────────────────────
+## Operator Behaviour
+## ─────────────────────────────────────────────────────────
+operator:
+  demoMode: "0"             # Must be "0" in production
+  dryRun: true              # Start with dry-run. Set false after validating recommendations.
+  autoFixEnabled: false     # Enable after confirming dry-run plans are safe.
+  cooldownSecs: 300         # 5 minutes between remediations per workload
+  watchIntervalSecs: 30     # Cluster poll interval (seconds)
+  logLevel: INFO
+  deniedNamespaces:
+    - kube-system
+    - kube-public
+    # Add any other namespaces that should never be auto-remediated:
+    # - cert-manager
+    # - monitoring
+
+## ─────────────────────────────────────────────────────────
+## Database
+## ─────────────────────────────────────────────────────────
+## Option A: SQLite with persistent volume (single replica, simple)
+database:
+  type: sqlite
+  url: ""
+
+persistence:
+  enabled: true
+  storageClass: ""         # Set to your cluster's storage class
+                           # EKS: gp3 | AKS: default | GKE: standard-rwo | Kind: standard
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  mountPath: /data
+
+## Option B: PostgreSQL (multi-replica, production recommended)
+## Uncomment and set the connection string in a Secret:
+#
+# database:
+#   type: postgres
+#   existingSecret: sre-db-creds    # Secret must contain key: url
+#
+# persistence:
+#   enabled: false
+
+## ─────────────────────────────────────────────────────────
+## Observability Integrations
+## ─────────────────────────────────────────────────────────
+prometheus:
+  enabled: true
+  url: http://prometheus-server.monitoring.svc:9090
+  # url: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+
+loki:
+  enabled: false
+  url: ""
+  # url: http://loki.monitoring.svc:3100
+
+## Enable Prometheus scraping of the operator's own metrics
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+  labels:
+    release: kube-prometheus-stack    # Match your Prometheus operator's label selector
+
+## ─────────────────────────────────────────────────────────
+## Scaling
+## ─────────────────────────────────────────────────────────
+replicaCount:
+  api: 2         # 2 API replicas for availability (requires PostgreSQL)
+  worker: 1      # 1 worker (singleton for learning loop consistency)
+  watcher: 1     # 1 watcher (single watch stream per cluster)
+
+## ─────────────────────────────────────────────────────────
+## Resources
+## ─────────────────────────────────────────────────────────
+resources:
+  api:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  worker:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  watcher:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+## ─────────────────────────────────────────────────────────
+## Security
+## ─────────────────────────────────────────────────────────
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  fsGroup: 1001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false     # SQLite needs write access to /data
+
+serviceAccount:
+  create: true
+  annotations: {}                   # Add IRSA/Workload Identity annotations here if needed
+  name: ai-sre-operator
+
+rbac:
+  create: true
+
+## ─────────────────────────────────────────────────────────
+## Networking
+## ─────────────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  port: 8000
+
+## Expose via Ingress (optional — use port-forward for secure access instead)
+ingress:
+  enabled: false
+  className: ""
+  annotations:
+    # nginx.ingress.kubernetes.io/auth-type: basic
+    # nginx.ingress.kubernetes.io/auth-secret: sre-basic-auth
+  hosts:
+    - host: sre-operator.internal.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+## Enable Streamlit UI
+ui:
+  enabled: true
+  port: 8501
+  service:
+    type: ClusterIP
+
+## ─────────────────────────────────────────────────────────
+## Pod placement
+## ─────────────────────────────────────────────────────────
+## Optional: pin to specific nodes or availability zones
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+## Optional: enable HPA for the API tier (requires metrics-server)
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70

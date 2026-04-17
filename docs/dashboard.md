@@ -1,6 +1,6 @@
 # Dashboard
 
-Streamlit dashboard at http://localhost:8501 with 7 tabs.
+Streamlit dashboard at http://localhost:8501 with 8 tabs.
 
 ## Prerequisites
 

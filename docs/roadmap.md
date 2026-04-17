@@ -57,7 +57,7 @@ Core infrastructure monitoring and AI-driven incident management.
 
 ### Infrastructure
 - ✅ FastAPI REST (35+ endpoints)
-- ✅ Streamlit dashboard (7 tabs)
+- ✅ Streamlit dashboard (8 tabs)
 - ✅ Click CLI
 - ✅ SQLite persistence (SQLAlchemy)
 - ✅ Helm chart (EKS/AKS/GKE/local)

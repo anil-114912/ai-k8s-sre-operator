@@ -106,8 +106,7 @@ class ErrorDetector:
     def __init__(self, patterns: List[Pattern], ignore_patterns: List[str] | None = None) -> None:
         self._patterns = patterns
         self._windows: Dict[str, DetectionWindow] = {
-            p.id: DetectionWindow(p.id, p.window_secs, p.count_threshold)
-            for p in patterns
+            p.id: DetectionWindow(p.id, p.window_secs, p.count_threshold) for p in patterns
         }
         self._counts: Dict[str, int] = defaultdict(int)
         self._samples: Dict[str, str] = {}
@@ -115,7 +114,7 @@ class ErrorDetector:
 
         # Compile ignore patterns
         self._ignores: List[re.Pattern] = []
-        for pat in (ignore_patterns or []):
+        for pat in ignore_patterns or []:
             try:
                 self._ignores.append(re.compile(pat, re.IGNORECASE))
             except re.error as exc:
@@ -151,17 +150,19 @@ class ErrorDetector:
         patterns = []
         for item in raw:
             try:
-                patterns.append(Pattern(
-                    id=item["id"],
-                    name=item["name"],
-                    regex=re.compile(item["pattern"], re.IGNORECASE | re.MULTILINE),
-                    severity=item.get("severity", "medium"),
-                    incident_type=item.get("incident_type", "APM_GENERIC"),
-                    count_threshold=int(item.get("count_threshold", _DEFAULT_COUNT_THRESHOLD)),
-                    window_secs=int(item.get("window_secs", _DEFAULT_WINDOW_SECS)),
-                    track_trend=bool(item.get("track_trend", False)),
-                    remediation_hint=item.get("remediation_hint", ""),
-                ))
+                patterns.append(
+                    Pattern(
+                        id=item["id"],
+                        name=item["name"],
+                        regex=re.compile(item["pattern"], re.IGNORECASE | re.MULTILINE),
+                        severity=item.get("severity", "medium"),
+                        incident_type=item.get("incident_type", "APM_GENERIC"),
+                        count_threshold=int(item.get("count_threshold", _DEFAULT_COUNT_THRESHOLD)),
+                        window_secs=int(item.get("window_secs", _DEFAULT_WINDOW_SECS)),
+                        track_trend=bool(item.get("track_trend", False)),
+                        remediation_hint=item.get("remediation_hint", ""),
+                    )
+                )
             except Exception as exc:
                 logger.warning("Skipping malformed pattern %s: %s", item.get("id", "?"), exc)
 
@@ -185,15 +186,17 @@ class ErrorDetector:
                 self._counts[p.id] += 1
                 if p.id not in self._samples:
                     self._samples[p.id] = line[:300]
-                matches.append(PatternMatch(
-                    pattern_id=p.id,
-                    pattern_name=p.name,
-                    severity=p.severity,
-                    incident_type=p.incident_type,
-                    line=line[:300],
-                    timestamp=ts,
-                    remediation_hint=p.remediation_hint,
-                ))
+                matches.append(
+                    PatternMatch(
+                        pattern_id=p.id,
+                        pattern_name=p.name,
+                        severity=p.severity,
+                        incident_type=p.incident_type,
+                        line=line[:300],
+                        timestamp=ts,
+                        remediation_hint=p.remediation_hint,
+                    )
+                )
 
         return matches
 
@@ -215,15 +218,17 @@ class ErrorDetector:
 
             # Only include in report if threshold met
             if count >= p.count_threshold:
-                results.append(DetectedPattern(
-                    pattern_id=p.id,
-                    pattern_name=p.name,
-                    count=count,
-                    severity=p.severity,
-                    incident_type=p.incident_type,
-                    sample=self._samples.get(p.id, ""),
-                    remediation_hint=p.remediation_hint,
-                ))
+                results.append(
+                    DetectedPattern(
+                        pattern_id=p.id,
+                        pattern_name=p.name,
+                        count=count,
+                        severity=p.severity,
+                        incident_type=p.incident_type,
+                        sample=self._samples.get(p.id, ""),
+                        remediation_hint=p.remediation_hint,
+                    )
+                )
 
         # Reset window
         self._counts.clear()
@@ -247,5 +252,3 @@ class ErrorDetector:
         if not hasattr(self, "_novel_buffer"):
             self._novel_buffer: deque = deque(maxlen=50)
         self._novel_buffer.append(line)
-
-

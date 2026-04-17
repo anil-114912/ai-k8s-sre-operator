@@ -1,0 +1,89 @@
+## Demo mode values — no Kubernetes cluster required.
+## Use this to evaluate the system locally without any infrastructure.
+##
+##   helm install ai-sre-demo ./helm/ai-k8s-sre-operator \
+##     --namespace ai-sre --create-namespace \
+##     --values helm/values-demo.yaml
+##
+## Or for local development:
+##   DEMO_MODE=1 make run-api && make run-ui && make simulate
+
+## Run with a simulated Kubernetes cluster (no kubeconfig needed)
+operator:
+  demoMode: "1"
+  dryRun: true
+  autoFixEnabled: false
+  logLevel: DEBUG
+  deniedNamespaces:
+    - kube-system
+    - kube-public
+
+## Use offline rule-based LLM (no API key required)
+## Set llm.apiKey to use real AI analysis
+llm:
+  provider: rule-based
+  apiKey: ""
+
+## No cloud provider auto-detection needed in demo mode
+cluster:
+  provider: generic
+
+## Disable Prometheus (no metrics endpoint available)
+prometheus:
+  enabled: false
+  url: ""
+
+loki:
+  enabled: false
+  url: ""
+
+## Use SQLite with in-memory or ephemeral storage
+database:
+  type: sqlite
+  url: ""
+
+persistence:
+  enabled: false    # No PVC needed for demo
+
+## Minimal resources — demo mode is low traffic
+resources:
+  api:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  worker:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  watcher:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+## Single replica (demo only)
+replicaCount:
+  api: 1
+  worker: 1
+  watcher: 1
+
+## No ingress needed in demo
+ingress:
+  enabled: false
+
+## No ServiceMonitor in demo
+serviceMonitor:
+  enabled: false
+
+## Enable UI for interactive exploration
+ui:
+  enabled: true
+  port: 8501

@@ -13,7 +13,7 @@ keywords:
   - devops
 maintainers:
   - name: Anil Thotakura
-    email: anil@example.com
+    url: https://github.com/anil-114912
 sources:
   - https://github.com/anil-114912/ai-k8s-sre-operator
 home: https://github.com/anil-114912/ai-k8s-sre-operator

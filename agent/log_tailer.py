@@ -51,7 +51,9 @@ class LogTailer:
             if self._file:
                 self._file.close()
             self._file = f
-            logger.debug("LogTailer opened: %s (inode=%d pos=%d)", self.path, self._inode, self._pos)
+            logger.debug(
+                "LogTailer opened: %s (inode=%d pos=%d)", self.path, self._inode, self._pos
+            )
             return True
         except (OSError, IOError) as exc:
             logger.warning("LogTailer: cannot open %s: %s", self.path, exc)

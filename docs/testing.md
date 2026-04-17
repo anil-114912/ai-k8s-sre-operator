@@ -30,7 +30,7 @@ DEMO_MODE=1 python3 -m pytest tests/test_feedback_loop.py::TestCaptureUnknownErr
 | test_correlation.py | 8 | Signal correlator cause-effect rules, OOM→CrashLoop, secret→CrashLoop, confidence scoring |
 | test_detectors.py | 26 | Original 9 detectors: CrashLoop, OOMKill, ImagePull, Pending, Probe, Service, Ingress, PVC, HPA |
 | test_new_detectors.py | 36 | 9 new detectors: DNS, RBAC, NetworkPolicy, CNI, ServiceMesh, NodePressure, Quota, Rollout, Storage |
-| test_knowledge_base.py | 39 | KB load (45 patterns), search scoring, provider boost, context builder, similarity retrieval, feedback boost, incident store methods |
+| test_knowledge_base.py | 39 | KB load (54 patterns), search scoring, provider boost, context builder, similarity retrieval, feedback boost, incident store methods |
 | test_feedback_loop.py | 26 | Error capture (Java/Python/Go), deduplication, embedder refit, feedback scoring, pattern promotion, confidence adjustment, end-to-end learning, API integration |
 | test_policies.py | 18 | Namespace allow/deny, action allowlist, safety levels, guardrails validation, cooldown enforcement, dry-run mode |
 | test_remediations.py | 11 | All 6 remediation executors in dry-run: restart_pod, rollout_restart, rollback, scale, patch_resources, rerun_job |

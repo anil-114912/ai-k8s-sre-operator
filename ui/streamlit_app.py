@@ -505,7 +505,7 @@ with tab4:
                     st.markdown("**Top patterns:** " + ", ".join(f"`{p}`" for p in top))
                 st.caption(f"Last report: {svc.get('last_report', '?')[:19]}")
 
-                if st.button("🔍 Detail", key=f"apm_detail_{svc.get('service_key', '')}"): 
+                if st.button("🔍 Detail", key=f"apm_detail_{svc.get('service_key', '')}"):
                     detail = api_get(
                         f"/api/v1/apm/services/{svc['service_name']}?namespace={svc['namespace']}"
                     )
@@ -519,8 +519,10 @@ with tab4:
 
     st.markdown("---")
     st.markdown("#### 🚨 Error Patterns Across Services")
-    err_sev = st.selectbox("Severity", ["All", "critical", "high", "medium", "low"], key="apm_err_sev")
-    err_params = f"?limit=20"
+    err_sev = st.selectbox(
+        "Severity", ["All", "critical", "high", "medium", "low"], key="apm_err_sev"
+    )
+    err_params = "?limit=20"
     if err_sev != "All":
         err_params += f"&severity={err_sev}"
     if apm_ns:
@@ -534,9 +536,7 @@ with tab4:
                 f"{err.get('total_count', 0)} total"
             ):
                 st.markdown(f"**Type:** `{err.get('incident_type', '?')}`")
-                st.markdown(
-                    f"**Affected services:** {', '.join(err.get('affected_services', []))}"
-                )
+                st.markdown(f"**Affected services:** {', '.join(err.get('affected_services', []))}")
                 if err.get("sample"):
                     st.code(err["sample"], language="text")
                 if err.get("remediation_hint"):
