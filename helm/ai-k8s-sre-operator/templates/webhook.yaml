@@ -30,7 +30,7 @@ spec:
         - name: webhook
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.webhook.image | default (printf \"%s:%s\" .Values.image.repository .Values.image.tag) }}"
+          image: "{{ .Values.webhook.image | default (printf "%s:%s" .Values.image.repository .Values.image.tag) }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
             - uvicorn
