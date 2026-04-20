@@ -902,6 +902,14 @@ async def scan_cluster(
     )
 
 
+@app.get("/api/v1/cluster/namespaces")
+async def cluster_namespaces() -> Dict[str, Any]:
+    """Return the list of namespaces from the connected cluster."""
+    client = get_k8s_client()
+    namespaces = client.list_namespaces()
+    return {"namespaces": namespaces, "count": len(namespaces)}
+
+
 @app.get("/api/v1/cluster/summary")
 async def cluster_summary() -> Dict[str, Any]:
     """Get current cluster health summary.
@@ -1071,6 +1079,7 @@ async def apm_ingest(report: APMIngestRequest) -> Dict[str, Any]:
         "error_rate": report.error_rate,
         "patterns_detected": report.patterns_detected,
         "metrics": report.metrics,
+        "novel_errors": report.novel_errors[:20],
         "last_report": now_str,
         "agent_version": report.agent_version,
     }
@@ -1249,6 +1258,105 @@ async def apm_learn(request: APMLearnRequest) -> Dict[str, Any]:
 _operator_scheduler: Optional[Any] = None
 _operator_cycle_results: List[Dict[str, Any]] = []
 
+# Auto-start interval (seconds). Set to 0 or "" to disable auto-start.
+_AUTO_START_INTERVAL = int(os.getenv("OPERATOR_AUTO_START_INTERVAL", "30"))
+
+
+def _sync_incidents_from_store() -> int:
+    """Sync incidents from the SQLite store into the in-memory _incidents dict.
+
+    The operator controller writes to its own IncidentStore (same SQLite DB).
+    This function reads recent incidents from the DB and adds any that are
+    missing from the API's in-memory _incidents dict so they appear in the
+    Live Incidents view without a manual scan.
+
+    Returns:
+        Number of newly synced incidents.
+    """
+    try:
+        recent = _store.list_incidents(limit=100)
+        synced = 0
+        for inc_dict in recent:
+            iid = inc_dict.get("id", "")
+            if iid and iid not in _incidents:
+                try:
+                    incident = Incident(**inc_dict)
+                except Exception:
+                    # If the dict doesn't cleanly map, build a minimal Incident
+                    try:
+                        inc_type = IncidentType(inc_dict.get("incident_type", "Unknown"))
+                    except ValueError:
+                        inc_type = IncidentType.unknown
+                    try:
+                        sev = Severity(inc_dict.get("severity", "medium"))
+                    except ValueError:
+                        sev = Severity.medium
+                    incident = Incident(
+                        id=iid,
+                        title=inc_dict.get("title", ""),
+                        incident_type=inc_type,
+                        severity=sev,
+                        namespace=inc_dict.get("namespace", "default"),
+                        workload=inc_dict.get("workload", ""),
+                        pod_name=inc_dict.get("pod_name"),
+                        detected_at=inc_dict.get("detected_at") or inc_dict.get("created_at") or datetime.utcnow().isoformat(),
+                        root_cause=inc_dict.get("root_cause"),
+                        confidence=inc_dict.get("confidence"),
+                        suggested_fix=inc_dict.get("suggested_fix"),
+                        raw_signals=inc_dict.get("raw_signals") or {},
+                    )
+                _incidents[iid] = incident
+                synced += 1
+        if synced:
+            logger.info("Synced %d incident(s) from store into live view", synced)
+        return synced
+    except Exception as exc:
+        logger.warning("Failed to sync incidents from store: %s", exc)
+        return 0
+
+
+def _on_operator_cycle(result: Dict[str, Any]) -> None:
+    """Shared callback for operator cycle completion."""
+    _operator_cycle_results.append(result)
+    if len(_operator_cycle_results) > 100:
+        _operator_cycle_results.pop(0)
+    # Sync any new incidents the controller created into the API's live view
+    _sync_incidents_from_store()
+
+
+@app.on_event("startup")
+async def _auto_start_operator_loop() -> None:
+    """Auto-start the continuous operator loop on API boot.
+
+    Controlled by OPERATOR_AUTO_START_INTERVAL env var (default 30s).
+    Set to 0 to disable.
+    """
+    global _operator_scheduler
+
+    # Load any previously persisted incidents into the live view
+    loaded = _sync_incidents_from_store()
+    if loaded:
+        logger.info("Loaded %d persisted incident(s) into live view on startup", loaded)
+
+    if _AUTO_START_INTERVAL <= 0:
+        logger.info("Operator auto-start disabled (OPERATOR_AUTO_START_INTERVAL=0)")
+        return
+
+    from sre_loop.scheduler import OperatorScheduler
+
+    _operator_scheduler = OperatorScheduler(
+        interval_secs=_AUTO_START_INTERVAL,
+        demo_mode=None,
+        auto_remediate=False,
+        namespace_filter="",
+        on_cycle_complete=_on_operator_cycle,
+    )
+    _operator_scheduler.start_background()
+    logger.info(
+        "Operator loop auto-started: interval=%ds (set OPERATOR_AUTO_START_INTERVAL=0 to disable)",
+        _AUTO_START_INTERVAL,
+    )
+
 
 @app.get("/api/v1/operator/status")
 async def operator_status() -> Dict[str, Any]:
@@ -1274,17 +1382,12 @@ async def operator_start(
     if _operator_scheduler and _operator_scheduler.is_running():
         return {"started": False, "message": "Operator loop is already running"}
 
-    def _on_cycle(result: Dict[str, Any]) -> None:
-        _operator_cycle_results.append(result)
-        if len(_operator_cycle_results) > 100:
-            _operator_cycle_results.pop(0)
-
     _operator_scheduler = OperatorScheduler(
         interval_secs=interval_secs,
         demo_mode=None,  # inherits DEMO_MODE env var
         auto_remediate=auto_remediate,
         namespace_filter=namespace,
-        on_cycle_complete=_on_cycle,
+        on_cycle_complete=_on_operator_cycle,
     )
     _operator_scheduler.start_background()
     logger.info(
@@ -2006,13 +2109,14 @@ async def get_remediation_ranking(
     from models.remediation import RemediationStep
 
     # Get known actions for this type from the KB
-    kb_results = _kb.search(incident_type, limit=5)
+    kb_results = _kb.search(incident_type, top_k=5)
     steps = []
     for result in kb_results:
-        for action_name in (result.pattern.get("remediation_steps") or []):
+        for idx, action_name in enumerate(result.remediation_steps or [], 1):
             if isinstance(action_name, dict):
                 action_name = action_name.get("action", str(action_name))
             steps.append(RemediationStep(
+                order=idx,
                 action=str(action_name),
                 description="",
                 safety_level="suggest_only",
@@ -2032,4 +2136,221 @@ async def get_remediation_ranking(
             }
             for s in ranked
         ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Health Rules Engine (AppDynamics-style)
+# ---------------------------------------------------------------------------
+
+from policies.health_rules import HealthRule as _HealthRule  # noqa: E402
+from policies.health_rules import HealthRulesEngine as _HealthRulesEngine  # noqa: E402
+
+_health_rules_engine = _HealthRulesEngine(load_defaults=True)
+
+
+class HealthRuleRequest(BaseModel):
+    """Request body for creating / updating a health rule."""
+
+    name: str
+    metric: str = "error_rate"
+    operator: str = "gt"
+    threshold: float = 0.05
+    severity: str = "warning"
+    enabled: bool = True
+    duration_secs: int = 0
+    namespace_filter: str = ""
+    service_filter: str = ""
+    description: str = ""
+
+
+@app.get("/api/v1/health-rules")
+async def list_health_rules() -> Dict[str, Any]:
+    """List all configured health rules."""
+    return {
+        "rules": _health_rules_engine.list_rules(),
+        "summary": _health_rules_engine.summary(),
+    }
+
+
+@app.post("/api/v1/health-rules", status_code=201)
+async def create_health_rule(req: HealthRuleRequest) -> Dict[str, Any]:
+    """Create a new health rule."""
+    rule = _HealthRule(
+        name=req.name,
+        metric=req.metric,
+        operator=req.operator,
+        threshold=req.threshold,
+        severity=req.severity,
+        enabled=req.enabled,
+        duration_secs=req.duration_secs,
+        namespace_filter=req.namespace_filter,
+        service_filter=req.service_filter,
+        description=req.description,
+    )
+    _health_rules_engine.add_rule(rule)
+    return rule.to_dict()
+
+
+@app.post("/api/v1/health-rules/evaluate")
+async def evaluate_health_rules() -> Dict[str, Any]:
+    """Evaluate all health rules against current APM service data."""
+    services = list(_apm_reports.values())
+    new_violations = _health_rules_engine.evaluate(services)
+    return {
+        "evaluated_services": len(services),
+        "new_violations": len(new_violations),
+        "violations": [v.to_dict() for v in new_violations],
+        "summary": _health_rules_engine.summary(),
+    }
+
+
+@app.get("/api/v1/health-rules/violations")
+async def get_health_rule_violations(
+    status: Optional[str] = Query(None, description="open | acknowledged | resolved"),
+    severity: Optional[str] = Query(None, description="critical | warning | info"),
+    namespace: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+) -> Dict[str, Any]:
+    """Return health rule violations with optional filters."""
+    violations = _health_rules_engine.get_violations(
+        status=status, severity=severity, namespace=namespace, limit=limit,
+    )
+    return {
+        "violations": violations,
+        "count": len(violations),
+        "summary": _health_rules_engine.summary(),
+    }
+
+
+@app.post("/api/v1/health-rules/violations/{violation_id}/acknowledge")
+async def acknowledge_violation(violation_id: str) -> Dict[str, Any]:
+    """Acknowledge a health rule violation."""
+    if not _health_rules_engine.acknowledge_violation(violation_id):
+        raise HTTPException(status_code=404, detail="Violation not found or already resolved")
+    return {"acknowledged": True, "violation_id": violation_id}
+
+
+@app.get("/api/v1/health-rules/{rule_id}")
+async def get_health_rule(rule_id: str) -> Dict[str, Any]:
+    """Get a specific health rule by ID."""
+    rule = _health_rules_engine.get_rule(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail=f"Health rule '{rule_id}' not found")
+    return rule.to_dict()
+
+
+@app.put("/api/v1/health-rules/{rule_id}")
+async def update_health_rule(rule_id: str, req: HealthRuleRequest) -> Dict[str, Any]:
+    """Update an existing health rule."""
+    updates = req.model_dump(exclude_unset=True)
+    rule = _health_rules_engine.update_rule(rule_id, updates)
+    if not rule:
+        raise HTTPException(status_code=404, detail=f"Health rule '{rule_id}' not found")
+    return rule.to_dict()
+
+
+@app.delete("/api/v1/health-rules/{rule_id}", status_code=204, response_model=None)
+async def delete_health_rule(rule_id: str) -> None:
+    """Delete a health rule."""
+    if not _health_rules_engine.delete_rule(rule_id):
+        raise HTTPException(status_code=404, detail=f"Health rule '{rule_id}' not found")
+
+
+@app.get("/api/v1/alerts/unified")
+async def unified_alerts(
+    namespace: Optional[str] = Query(None),
+    severity: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+) -> Dict[str, Any]:
+    """Unified alerts view combining anomaly alerts, health rule violations, and incidents.
+
+    This powers the Alerts & Monitoring dashboard tab.
+    """
+    alerts: List[Dict[str, Any]] = []
+
+    # 1. Health rule violations (open)
+    for v in _health_rules_engine.get_violations(status="open", namespace=namespace, limit=limit):
+        if severity and v.get("severity") != severity:
+            continue
+        alerts.append({
+            "source": "health_rule",
+            "id": v["id"],
+            "severity": v["severity"],
+            "title": v["rule_name"],
+            "message": v["message"],
+            "namespace": v["namespace"],
+            "service": v["service_name"],
+            "metric": v["metric"],
+            "current_value": v["current_value"],
+            "threshold": v["threshold"],
+            "status": v["status"],
+            "timestamp": v["opened_at"],
+        })
+
+    # 2. Anomaly alerts
+    for a in _anomaly_analyzer.get_recent_alerts(namespace=namespace, limit=limit):
+        if severity and a.get("severity") != severity:
+            continue
+        alerts.append({
+            "source": "anomaly",
+            "id": a.get("timestamp", ""),
+            "severity": a.get("severity", "warning"),
+            "title": a.get("alert_type", "anomaly"),
+            "message": a.get("message", ""),
+            "namespace": a.get("namespace", ""),
+            "service": a.get("service", ""),
+            "metric": a.get("alert_type", ""),
+            "current_value": a.get("current_value", 0),
+            "threshold": a.get("baseline_value", 0),
+            "status": "open",
+            "timestamp": a.get("timestamp", ""),
+        })
+
+    # 3. Active incidents as alerts
+    for inc in _incidents.values():
+        inc_dict = inc.model_dump() if hasattr(inc, "model_dump") else inc.dict()
+        inc_sev = inc_dict.get("severity", "info")
+        if hasattr(inc_sev, "value"):
+            inc_sev = inc_sev.value
+        inc_status = inc_dict.get("status", "detected")
+        if hasattr(inc_status, "value"):
+            inc_status = inc_status.value
+        if inc_status in ("resolved", "closed"):
+            continue
+        if namespace and inc_dict.get("namespace") != namespace:
+            continue
+        if severity and inc_sev != severity:
+            continue
+        alerts.append({
+            "source": "incident",
+            "id": inc_dict.get("id", ""),
+            "severity": inc_sev,
+            "title": inc_dict.get("title", ""),
+            "message": inc_dict.get("root_cause") or inc_dict.get("title", ""),
+            "namespace": inc_dict.get("namespace", ""),
+            "service": inc_dict.get("workload", ""),
+            "metric": inc_dict.get("incident_type", ""),
+            "current_value": inc_dict.get("confidence", 0),
+            "threshold": 0,
+            "status": inc_status,
+            "timestamp": inc_dict.get("detected_at", ""),
+        })
+
+    # Sort by severity priority then timestamp
+    sev_order = {"critical": 0, "high": 1, "warning": 2, "medium": 3, "low": 4, "info": 5}
+    alerts.sort(key=lambda a: (sev_order.get(a["severity"], 9), a.get("timestamp", "")))
+
+    # Summary counts
+    by_source = {}
+    by_severity = {}
+    for a in alerts:
+        by_source[a["source"]] = by_source.get(a["source"], 0) + 1
+        by_severity[a["severity"]] = by_severity.get(a["severity"], 0) + 1
+
+    return {
+        "alerts": alerts[:limit],
+        "total": len(alerts),
+        "by_source": by_source,
+        "by_severity": by_severity,
     }

@@ -77,7 +77,6 @@ class SlackIntegration(BaseIntegration):
         ns = getattr(incident, "namespace", "?")
         wl = getattr(incident, "workload", "?")
         itype = getattr(incident, "incident_type", "?")
-        iid = getattr(incident, "id", "")
         confidence = getattr(incident, "confidence", 0.0)
         root_cause = getattr(incident, "root_cause", "") or ""
 

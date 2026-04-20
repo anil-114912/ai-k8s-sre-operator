@@ -48,7 +48,7 @@ class JiraIntegration(BaseIntegration):
         cfg.setdefault("enabled", os.getenv("JIRA_ENABLED", "false").lower() == "true")
         cfg.setdefault("issue_type", os.getenv("JIRA_ISSUE_TYPE", "Bug"))
         raw_labels = os.getenv("JIRA_LABELS", "sre,kubernetes")
-        cfg.setdefault("labels", [l.strip() for l in raw_labels.split(",") if l.strip()])
+        cfg.setdefault("labels", [label.strip() for label in raw_labels.split(",") if label.strip()])
         super().__init__(cfg)
         self._url: str = cfg["url"]
         self._project: str = cfg["project_key"]

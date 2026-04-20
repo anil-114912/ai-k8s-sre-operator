@@ -51,3 +51,237 @@
   learned_at: '2026-04-12T05:30:10.314807+00:00'
   feedback_count: 4
   success_count: 4
+- id: learned-20260417191157-3
+  title: 'Learned: Unknown in dev/usls-admin-console-dev'
+  scope: pod
+  symptoms:
+  - Application error in usls-admin-console-dev
+  event_patterns: []
+  log_patterns:
+  - "\u2A2F Error: 'sharp' is required to be installed in standalone mode for the\
+    \ image optimization to function correctly. Read more at: https://nextjs.org/docs/messages/sharp-missing-in-production"
+  - '[Axios][Error] POST https://usls-web-exp-api-qa-gq3lzr.3yugyh.usa-w2.cloudhub.io/api/attempts'
+  metric_patterns: []
+  root_cause: "Application error detected in dev/usls-admin-console-dev: \u2A2F Error:\
+    \ 'sharp' is required to be installed in standalone mode for the image optimization\
+    \ to functi"
+  remediation_steps:
+  - 'Check application logs: kubectl logs -n dev -l app=usls-admin-console-dev'
+  - 'Describe pod: kubectl describe pod -n dev -l app=usls-admin-console-dev'
+  - Review recent deployments for code changes that may have introduced the error
+  confidence_hints: []
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags:
+  - learned
+  - unknown
+  - dev
+  learned_from_namespace: dev
+  learned_from_workload: usls-admin-console-dev
+  learned_at: '2026-04-17T19:11:57.571721+00:00'
+  feedback_count: 0
+  success_count: 0
+- id: learned-20260417191157-4
+  title: 'Learned: Unknown in qa/api-server'
+  scope: pod
+  symptoms:
+  - Application error in api-server
+  event_patterns: []
+  log_patterns:
+  - api_server DEBUG -> -- auth error --
+  metric_patterns: []
+  root_cause: 'Application error detected in qa/api-server: api_server DEBUG -> --
+    auth error --'
+  remediation_steps:
+  - 'Check application logs: kubectl logs -n qa -l app=api-server'
+  - 'Describe pod: kubectl describe pod -n qa -l app=api-server'
+  - Review recent deployments for code changes that may have introduced the error
+  confidence_hints: []
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags:
+  - learned
+  - unknown
+  - qa
+  learned_from_namespace: qa
+  learned_from_workload: api-server
+  learned_at: '2026-04-17T19:11:57.583882+00:00'
+  feedback_count: 0
+  success_count: 0
+- id: learned-20260417191157-5
+  title: 'Learned: Unknown in qa/usls-agent-portal'
+  scope: pod
+  symptoms:
+  - Application error in usls-agent-portal
+  event_patterns: []
+  log_patterns:
+  - '{"timestamp":"2026-04-13T19:11:43.384Z","level":"error","message":"Request failed","method":"GET","path":"/api/account/8a8aa1d29d791bce019d884129e91c3c/linked-accounts","status":404,"duration":15}'
+  - '{"timestamp":"2026-04-17T13:07:14.565Z","level":"error","message":"Mesh API error","method":"GET","url":"https://qa-cc-api.uslawshield.com/v1/account/8a8aa1c39d9737e4019d9b4c3090446c/linked-accounts",'
+  - '{"timestamp":"2026-04-13T19:16:19.820Z","level":"error","message":"Mesh API error","method":"GET","url":"https://qa-cc-api.uslawshield.com/v1/account/8a8aa1d29d791bce019d884129e91c3c/linked-accounts",'
+  - '{"timestamp":"2026-04-13T19:16:19.821Z","level":"error","message":"Request failed","method":"GET","path":"/api/account/8a8aa1d29d791bce019d884129e91c3c/linked-accounts","status":404,"duration":21}'
+  - '{"timestamp":"2026-04-17T13:07:14.565Z","level":"error","message":"Request failed","method":"GET","path":"/api/account/8a8aa1c39d9737e4019d9b4c3090446c/linked-accounts","status":404,"duration":6}'
+  metric_patterns: []
+  root_cause: 'Application error detected in qa/usls-agent-portal: {"timestamp":"2026-04-13T19:11:43.384Z","level":"error","message":"Request
+    failed","method":"GET","p'
+  remediation_steps:
+  - 'Check application logs: kubectl logs -n qa -l app=usls-agent-portal'
+  - 'Describe pod: kubectl describe pod -n qa -l app=usls-agent-portal'
+  - Review recent deployments for code changes that may have introduced the error
+  confidence_hints: []
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags:
+  - learned
+  - unknown
+  - qa
+  learned_from_namespace: qa
+  learned_from_workload: usls-agent-portal
+  learned_at: '2026-04-17T19:11:57.593065+00:00'
+  feedback_count: 0
+  success_count: 0
+- id: learned-20260417191157-6
+  title: 'Learned: Unknown in qa/usls-agent-portal'
+  scope: pod
+  symptoms:
+  - Application error in usls-agent-portal
+  event_patterns: []
+  log_patterns:
+  - '{"timestamp":"2026-04-16T13:10:56.383Z","level":"error","message":"Request failed","method":"GET","path":"/api/account/8a8aa0ad9d791bc2019d877ee6647c4f/linked-accounts","status":404,"duration":10}'
+  - '{"timestamp":"2026-04-14T07:21:22.234Z","level":"error","message":"Mesh API error","method":"GET","url":"https://qa-cc-api.uslawshield.com/v1/account/8a8aa0ad9d88d11b019d8ad8fad667b6/linked-accounts",'
+  - '{"timestamp":"2026-04-14T20:50:33.288Z","level":"error","message":"Mesh API error","method":"GET","url":"https://qa-cc-api.uslawshield.com/v1/account/8a8aa03c9d793037019d883809e81b51/linked-accounts",'
+  - '{"timestamp":"2026-04-14T07:21:22.236Z","level":"error","message":"Request failed","method":"GET","path":"/api/account/8a8aa0ad9d88d11b019d8ad8fad667b6/linked-accounts","status":404,"duration":15}'
+  - '{"timestamp":"2026-04-13T19:19:44.694Z","level":"error","message":"Request failed","method":"GET","path":"/api/account/8a8aa1d29d791bce019d884129e91c3c/linked-accounts","status":404,"duration":8}'
+  metric_patterns: []
+  root_cause: 'Application error detected in qa/usls-agent-portal: {"timestamp":"2026-04-16T13:10:56.383Z","level":"error","message":"Request
+    failed","method":"GET","p'
+  remediation_steps:
+  - 'Check application logs: kubectl logs -n qa -l app=usls-agent-portal'
+  - 'Describe pod: kubectl describe pod -n qa -l app=usls-agent-portal'
+  - Review recent deployments for code changes that may have introduced the error
+  confidence_hints: []
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags:
+  - learned
+  - unknown
+  - qa
+  learned_from_namespace: qa
+  learned_from_workload: usls-agent-portal
+  learned_at: '2026-04-17T19:11:57.602534+00:00'
+  feedback_count: 0
+  success_count: 0
+- id: learned-20260417191226-7
+  title: 'Learned: Unknown in qa/usls-agent-portal'
+  scope: pod
+  symptoms:
+  - Application error in usls-agent-portal
+  event_patterns: []
+  log_patterns:
+  - '{"timestamp":"2026-04-17T12:14:11.301Z","level":"error","message":"Mesh API error","method":"GET","url":"https://qa-cc-api.uslawshield.com/v1/account/8a8aa1c39d9737e4019d9b4c3090446c/linked-accounts",'
+  - '{"timestamp":"2026-04-17T12:14:11.302Z","level":"error","message":"Request failed","method":"GET","path":"/api/account/8a8aa1c39d9737e4019d9b4c3090446c/linked-accounts","status":404,"duration":7}'
+  metric_patterns: []
+  root_cause: 'Application error detected in qa/usls-agent-portal: {"timestamp":"2026-04-17T12:14:11.301Z","level":"error","message":"Mesh
+    API error","method":"GET","u'
+  remediation_steps:
+  - 'Check application logs: kubectl logs -n qa -l app=usls-agent-portal'
+  - 'Describe pod: kubectl describe pod -n qa -l app=usls-agent-portal'
+  - Review recent deployments for code changes that may have introduced the error
+  confidence_hints: []
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags:
+  - learned
+  - unknown
+  - qa
+  learned_from_namespace: qa
+  learned_from_workload: usls-agent-portal
+  learned_at: '2026-04-17T19:12:26.574873+00:00'
+  feedback_count: 0
+  success_count: 0
+- id: learned-20260417191226-8
+  title: 'Learned: Unknown in qa/usls-agent-portal'
+  scope: pod
+  symptoms:
+  - Application error in usls-agent-portal
+  event_patterns: []
+  log_patterns:
+  - '{"timestamp":"2026-04-17T11:47:55.572Z","level":"error","message":"Request failed","method":"GET","path":"/api/account/8a8aa03c9d974c7e019d9b4033e046b3/linked-accounts","status":404,"duration":17}'
+  metric_patterns: []
+  root_cause: 'Application error detected in qa/usls-agent-portal: {"timestamp":"2026-04-17T11:47:55.572Z","level":"error","message":"Request
+    failed","method":"GET","p'
+  remediation_steps:
+  - 'Check application logs: kubectl logs -n qa -l app=usls-agent-portal'
+  - 'Describe pod: kubectl describe pod -n qa -l app=usls-agent-portal'
+  - Review recent deployments for code changes that may have introduced the error
+  confidence_hints: []
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags:
+  - learned
+  - unknown
+  - qa
+  learned_from_namespace: qa
+  learned_from_workload: usls-agent-portal
+  learned_at: '2026-04-17T19:12:26.587795+00:00'
+  feedback_count: 0
+  success_count: 0
+- id: learned-20260417192628-9
+  title: 'Learned: Unknown in qa/usls-agent-portal'
+  scope: pod
+  symptoms:
+  - Application error in usls-agent-portal
+  event_patterns: []
+  log_patterns:
+  - '{"timestamp":"2026-04-13T19:11:43.383Z","level":"error","message":"Mesh API error","method":"GET","url":"https://qa-cc-api.uslawshield.com/v1/account/8a8aa1d29d791bce019d884129e91c3c/linked-accounts",'
+  - '{"timestamp":"2026-04-16T13:12:23.409Z","level":"error","message":"Mesh API error","method":"GET","url":"https://qa-cc-api.uslawshield.com/v1/account/8a8aa0ad9d791bc2019d877ee6647c4f/linked-accounts",'
+  - '{"timestamp":"2026-04-16T13:12:23.410Z","level":"error","message":"Request failed","method":"GET","path":"/api/account/8a8aa0ad9d791bc2019d877ee6647c4f/linked-accounts","status":404,"duration":7}'
+  metric_patterns: []
+  root_cause: 'Application error detected in qa/usls-agent-portal: {"timestamp":"2026-04-13T19:11:43.383Z","level":"error","message":"Mesh
+    API error","method":"GET","u'
+  remediation_steps:
+  - 'Check application logs: kubectl logs -n qa -l app=usls-agent-portal'
+  - 'Describe pod: kubectl describe pod -n qa -l app=usls-agent-portal'
+  - Review recent deployments for code changes that may have introduced the error
+  confidence_hints: []
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags:
+  - learned
+  - unknown
+  - qa
+  learned_from_namespace: qa
+  learned_from_workload: usls-agent-portal
+  learned_at: '2026-04-17T19:26:28.436314+00:00'
+  feedback_count: 0
+  success_count: 0
+- id: learned-20260417192628-10
+  title: 'Learned: Unknown in qa/usls-agent-portal'
+  scope: pod
+  symptoms:
+  - Application error in usls-agent-portal
+  event_patterns: []
+  log_patterns:
+  - '{"timestamp":"2026-04-16T13:10:56.381Z","level":"error","message":"Mesh API error","method":"GET","url":"https://qa-cc-api.uslawshield.com/v1/account/8a8aa0ad9d791bc2019d877ee6647c4f/linked-accounts",'
+  - '{"timestamp":"2026-04-16T20:16:15.420Z","level":"error","message":"Request failed","method":"GET","path":"/api/account/8a8aa00c9d974c77019d97eebb216c84/linked-accounts","status":404,"duration":18}'
+  - '{"timestamp":"2026-04-16T20:16:15.419Z","level":"error","message":"Mesh API error","method":"GET","url":"https://qa-cc-api.uslawshield.com/v1/account/8a8aa00c9d974c77019d97eebb216c84/linked-accounts",'
+  - '{"timestamp":"2026-04-13T19:19:44.693Z","level":"error","message":"Mesh API error","method":"GET","url":"https://qa-cc-api.uslawshield.com/v1/account/8a8aa1d29d791bce019d884129e91c3c/linked-accounts",'
+  - '{"timestamp":"2026-04-14T20:50:33.290Z","level":"error","message":"Request failed","method":"GET","path":"/api/account/8a8aa03c9d793037019d883809e81b51/linked-accounts","status":404,"duration":10}'
+  metric_patterns: []
+  root_cause: 'Application error detected in qa/usls-agent-portal: {"timestamp":"2026-04-16T13:10:56.381Z","level":"error","message":"Mesh
+    API error","method":"GET","u'
+  remediation_steps:
+  - 'Check application logs: kubectl logs -n qa -l app=usls-agent-portal'
+  - 'Describe pod: kubectl describe pod -n qa -l app=usls-agent-portal'
+  - Review recent deployments for code changes that may have introduced the error
+  confidence_hints: []
+  safe_auto_fix: false
+  safety_level: suggest_only
+  tags:
+  - learned
+  - unknown
+  - qa
+  learned_from_namespace: qa
+  learned_from_workload: usls-agent-portal
+  learned_at: '2026-04-17T19:26:28.451799+00:00'
+  feedback_count: 0
+  success_count: 0

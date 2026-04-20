@@ -603,9 +603,11 @@ class IncidentStore:
             except (json.JSONDecodeError, TypeError):
                 pass
 
+        ts = record.created_at.isoformat() if record.created_at else None
         return {
             "id": record.id,
             "title": record.title,
+            "incident_type": record.incident_type,
             "type": record.incident_type,
             "severity": record.severity,
             "namespace": record.namespace,
@@ -616,7 +618,8 @@ class IncidentStore:
             "suggested_fix": record.suggested_fix,
             "ai_explanation": record.ai_explanation,
             "resolved": record.resolved,
-            "created_at": record.created_at.isoformat() if record.created_at else None,
+            "created_at": ts,
+            "detected_at": ts,
             "cluster_name": getattr(record, "cluster_name", None),
             "feedback_score": getattr(record, "feedback_score", 0.0) or 0.0,
             "resolution_outcome": getattr(record, "resolution_outcome", None),

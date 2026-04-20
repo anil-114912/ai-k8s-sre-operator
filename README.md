@@ -8,7 +8,7 @@
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-1.28+-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io)
 [![Tests](https://img.shields.io/badge/Tests-202%20passing-brightgreen?logo=pytest&logoColor=white)](#testing)
 [![Detectors](https://img.shields.io/badge/Detectors-18-orange)](#infrastructure-monitoring)
-[![KB Patterns](https://img.shields.io/badge/Knowledge%20Base-54%20patterns-06b6d4)](#knowledge-base)
+[![KB Patterns](https://img.shields.io/badge/Knowledge%20Base-64%20patterns-06b6d4)](#knowledge-base)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 [![EKS](https://img.shields.io/badge/EKS-supported-FF9900?logo=amazon-aws&logoColor=white)](docs/platforms.md)
 [![AKS](https://img.shields.io/badge/AKS-supported-0078D4?logo=microsoft-azure&logoColor=white)](docs/platforms.md)
@@ -26,11 +26,17 @@ This tool addresses a gap that every SRE team eventually hits: your cluster moni
 |---|---|
 | **Infrastructure SRE** | 18 deterministic detectors catch CrashLoops, OOMKills, PVC failures, DNS issues, RBAC errors, service misconfigurations, node pressure, and more |
 | **Application APM** | A lightweight sidecar agent tails pod logs and reports error rates, latency, and exception patterns — no SDK or code changes required |
-| **AI Root Cause Analysis** | LLM (Claude/GPT) + RAG over 54 knowledge base patterns + incident history explains the actual root cause, not just symptoms |
+| **AI Root Cause Analysis** | LLM (Claude/GPT) + RAG over 64 knowledge base patterns + incident history explains the actual root cause, not just symptoms |
 | **Safe Automated Remediation** | 3-tier safety system (auto-fix / approval-required / suggest-only) with dry-run mode, namespace guardrails, and per-workload cooldowns |
 | **Self-Learning** | The system learns from operator feedback, adjusts confidence scores, and promotes successful patterns to the knowledge base |
 
 Runs fully **offline in demo mode** — no API key, no cluster required. Ready to deploy on **EKS, AKS, GKE, or self-hosted** clusters via Helm.
+
+| **Health Rules Engine** | AppDynamics-style threshold monitoring with configurable rules, violation tracking, and acknowledgment workflow |
+| **Proactive Anomaly Detection** | CPU spikes, memory growth, error rate spikes, latency spikes, and restart rate anomalies detected before incidents fire |
+| **Multi-Cluster Fleet** | Registry with health scores, heartbeats, fleet-wide aggregation, and per-cluster drill-down |
+| **External Integrations** | Slack, PagerDuty, and Jira notifications with per-integration enable/disable and test endpoints |
+| **Audit Trail** | Every remediation approval, block, and auto-execution logged to a structured JSON-L audit trail |
 
 ---
 
@@ -41,7 +47,7 @@ This section reflects what is actually implemented, not what is planned.
 ### Implemented and working
 
 - **18 infrastructure detectors** — CrashLoopBackOff (6 root cause variants), OOMKill, ImagePull, PendingPod, ProbeFailure, Service selector mismatch, Ingress backend, PVC, HPA, DNS, RBAC, NetworkPolicy, CNI, ServiceMesh, NodePressure, ResourceQuota, Rollout, Storage
-- **54 knowledge base patterns** — Generic K8s (12), EKS (6), AKS (5), GKE (5), Networking (8), Storage (6), Security (5), Cluster (4), Application (3)
+- **64 knowledge base patterns** — Generic K8s (12), EKS (6), AKS (5), GKE (5), Networking (8), Storage (6), Security (5), Cluster (4), Application (3), Learned (10)
 - **AI RCA** — Anthropic Claude and OpenAI GPT with RAG, plus offline rule-based fallback (no API key needed)
 - **3-tier remediation safety** — auto-fix / approval-required / suggest-only with dry-run mode, namespace policies, and cooldowns
 - **6 remediation executors** — pod restart, rollout restart, scale, rollback, resource patch, job rerun
@@ -61,8 +67,8 @@ This section reflects what is actually implemented, not what is planned.
 - **Cluster health score** — 0-100 with A-F grade; severity, recurrence, and velocity deductions
 - **Playbook system** — YAML-based structured playbooks for CrashLoop, OOM, Ingress with variable substitution
 - **Simulation engine** — 4 named scenarios (crashloop, oom, ingress-failure, pending-pods) that run real detectors
-- **FastAPI REST** — 60+ endpoints with Swagger docs at `/docs`
-- **Streamlit dashboard** — 10 tabs: incidents, RCA, remediation, APM (with latency/error charts + anomaly alerts), history, cluster scan, knowledge base, learning & feedback, learning insights, multi-cluster
+- **FastAPI REST** — 68 endpoints with Swagger docs at `/docs`
+- **Streamlit dashboard** — 13 tabs: overview, live incidents, alerts & monitoring, APM services, health rules, RCA analysis, remediation, cluster scan, incident history, knowledge base, learning & feedback, learning insights, multi-cluster
 - **Click CLI** — `ai-sre cluster scan`, `incidents list`, `incident analyze`, `remediation plan/execute`, `simulate`, `knowledge search`
 - **SQLite persistence** — incidents, feedback, learned patterns (PostgreSQL ready via `DATABASE_URL`)
 - **Helm chart** — EKS, AKS, GKE, and local; pre-built demo and production values; webhook template; integrations config
@@ -79,6 +85,9 @@ This section reflects what is actually implemented, not what is planned.
 - Fine-tuned model on accumulated incident history
 - SLO tracking and error budget burn rate
 - APM trace-to-K8s-event correlation (currently APM and K8s events are separate)
+- RBAC for the operator itself (SSO/OIDC)
+- Natural language incident queries
+- Automated post-mortem drafts
 
 ---
 
@@ -342,7 +351,7 @@ See [docs/architecture.md](docs/architecture.md) for the full layer-by-layer bre
 | Component | Details |
 |---|---|
 | **18 failure detectors** | CrashLoopBackOff, OOMKill, ImagePull, PendingPod, ProbeFailure, ServiceMismatch, IngressBackend, PVC, HPA, DNS, RBAC, NetworkPolicy, CNI, ServiceMesh, NodePressure, Quota, Rollout, Storage |
-| **54 KB patterns** | Generic K8s (12), EKS (6), AKS (5), GKE (5), Networking (8), Storage (6), Security (5), Cluster (4), Application (3) |
+| **64 KB patterns** | Generic K8s (12), EKS (6), AKS (5), GKE (5), Networking (8), Storage (6), Security (5), Cluster (4), Application (3), Learned (10) |
 | **Cloud provider awareness** | Auto-detects EKS/AKS/GKE from node `spec.providerID` and labels; boosts cloud-specific patterns |
 | **Signal correlation** | Every signal classified as root_cause, symptom, or contributing_factor with causal timeline |
 
@@ -547,7 +556,7 @@ See [docs/safety.md](docs/safety.md) for the full action mapping, blast radius a
 
 ## Knowledge Base
 
-54 failure patterns across 9 categories, all human-readable YAML in [knowledge/failures/](knowledge/failures/). No Python required to add custom patterns.
+64 failure patterns across 10 categories, all human-readable YAML in [knowledge/failures/](knowledge/failures/). No Python required to add custom patterns.
 
 | Category | Patterns | Example failures |
 |---|---|---|
@@ -560,6 +569,7 @@ See [docs/safety.md](docs/safety.md) for the full action mapping, blast radius a
 | Security | 5 | RBAC forbidden, ServiceAccount missing, Pod Security Admission |
 | Cluster | 4 | ResourceQuota exceeded, LimitRange violation, Node NotReady, etcd |
 | Application | 3 | DB connection pool, HTTP 5xx spike, memory leak |
+| Learned | 10 | Patterns promoted from operator feedback and unknown error capture |
 
 Each pattern includes: symptoms, event patterns, log regex patterns, metric thresholds, root cause explanation, ordered remediation steps, confidence boosts, and safety level classification.
 
@@ -936,17 +946,21 @@ See [docs/evaluation.md](docs/evaluation.md) for the full methodology, confidenc
 
 18 detectors, 54 KB patterns, AI RCA, 3-tier remediation, feedback learning, multi-cloud, CI/CD, Helm.
 
-### Phase 2 — APM (in progress)
+### Phase 2 — APM (complete)
 
-Sidecar agent, APM ingest, service health scores, APM+SRE correlation. Auto-injection webhook planned.
+Sidecar agent, APM ingest, service health scores, APM+SRE correlation, auto-injection webhook.
 
-### Phase 3 — Advanced AI (planned)
+### Phase 3 — Advanced AI (partially complete)
 
-Time-series anomaly detection, proactive failure prediction, natural language incident queries, automated post-mortem drafts.
+Proactive anomaly detection (CPU spikes, memory growth, error rate spikes, latency spikes, restart rate). Health rules engine with AppDynamics-style threshold monitoring and violation tracking.
 
-### Phase 4 — Enterprise (planned)
+Planned: proactive failure prediction, natural language incident queries, automated post-mortem drafts.
 
-Multi-cluster, RBAC for the operator itself, SSO/OIDC, Slack/PagerDuty/Jira, SLO tracking, PostgreSQL backend.
+### Phase 4 — Enterprise (partially complete)
+
+Multi-cluster registry with fleet health aggregation, Slack/PagerDuty/Jira integrations, audit logging, unified alerts view.
+
+Planned: RBAC for the operator itself, SSO/OIDC, SLO tracking, PostgreSQL backend.
 
 See [docs/roadmap.md](docs/roadmap.md) for the detailed backlog.
 
@@ -981,9 +995,9 @@ Tests cover: all 18 detectors, KB search and scoring, API endpoints, signal corr
 | [Learning and Feedback](docs/learning.md) | Feedback loop, confidence adjustment, pattern promotion |
 | [Safety Model](docs/safety.md) | L1/L2/L3 actions, guardrails, blast radius, audit log |
 | [Evaluation](docs/evaluation.md) | Accuracy metrics, confidence calibration, feedback model |
-| [API Reference](docs/api.md) | All 29 endpoints with real request/response examples |
+| [API Reference](docs/api.md) | All 68 endpoints with real request/response examples |
 | [CLI Reference](docs/cli.md) | All CLI commands |
-| [Dashboard](docs/dashboard.md) | 8 UI tabs |
+| [Dashboard](docs/dashboard.md) | 13 UI tabs |
 | [Configuration](docs/configuration.md) | Environment variables, Helm values, agent config |
 | [Deployment](docs/deployment.md) | Docker, Helm, production hardening, RBAC |
 | [Testing](docs/testing.md) | 202 tests, coverage, integration tests |

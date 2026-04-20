@@ -1,0 +1,11 @@
+# AI SRE Operator — Streamlit config
+# base is intentionally NOT set so the app inherits the user's
+# OS / browser color-scheme preference (dark or light).
+# Our injected CSS handles both modes via @media + [data-theme].
+
+[theme]
+primaryColor = "#7C3AED"
+font         = "sans serif"
+
+[browser]
+gatherUsageStats = false

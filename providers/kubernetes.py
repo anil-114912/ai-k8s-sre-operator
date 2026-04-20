@@ -516,6 +516,10 @@ class _SimulatedK8s:
         """Return 'generic' — simulated cluster has no real cloud provider."""
         return PROVIDER_GENERIC
 
+    def list_namespaces(self) -> List[str]:
+        """Return simulated namespace list."""
+        return ["default", "dev", "kube-system", "production", "staging"]
+
     def get_cluster_state(self) -> Dict[str, Any]:
         """Return the simulated cluster state."""
         return _make_simulated_cluster_state()
@@ -668,6 +672,19 @@ class RealK8sClient:
             logger.warning("detect_provider: node list failed (%s) — defaulting to generic", exc)
 
         return PROVIDER_GENERIC
+
+    def list_namespaces(self) -> List[str]:
+        """Return sorted list of namespace names from the cluster."""
+        try:
+            ns_list = self._core.list_namespace(watch=False)
+            return sorted(
+                ns.metadata.name
+                for ns in ns_list.items
+                if ns.metadata and ns.metadata.name
+            )
+        except Exception as exc:
+            logger.warning("Failed to list namespaces: %s", exc)
+            return []
 
     def get_cluster_state(self) -> Dict[str, Any]:
         """Fetch real cluster state from the Kubernetes API server."""

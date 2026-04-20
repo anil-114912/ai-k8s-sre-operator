@@ -186,11 +186,11 @@ class OperatorController:
         # 3. Correlate signals
         correlation = None
         try:
-            raw_signals_text = str(cluster_state.get("events", []))[:2000]
+            raw_signals_dict = {"events_text": str(cluster_state.get("events", []))[:2000]}
             correlation = self._correlator.correlate(
                 detections=detections,
                 cluster_state=cluster_state,
-                raw_signals=raw_signals_text,
+                raw_signals=raw_signals_dict,
             )
         except Exception as exc:
             logger.error("Correlation failed: %s", exc)
@@ -220,7 +220,7 @@ class OperatorController:
                     logger.debug("Skipping duplicate incident (fp=%s)", fp[:16])
                     continue
 
-                self._store.save(incident)
+                self._store.save_incident(incident)
                 self._register_fingerprint(fp, incident.id)
                 incidents_created += 1
                 self._total_incidents += 1
@@ -245,7 +245,7 @@ class OperatorController:
                     memory_context=memory_context,
                     cluster_patterns=cluster_patterns,
                 )
-                self._store.save(analyzed)
+                self._store.save_incident(analyzed)
                 incidents_analyzed += 1
             except Exception as exc:
                 logger.error("RCA failed for incident %s: %s", incident.id, exc)
@@ -370,9 +370,41 @@ class OperatorController:
 
     def _get_recent_unanalyzed(self) -> list:
         """Fetch recently created incidents not yet analyzed."""
+        from models.incident import Incident, IncidentType, Severity
+
         try:
-            all_incidents = self._store.list_recent(limit=20)
-            return [inc for inc in all_incidents if inc.root_cause is None][:5]
+            all_dicts = self._store.list_incidents(limit=20)
+            results = []
+            for d in all_dicts:
+                if d.get("root_cause"):
+                    continue
+                try:
+                    inc = Incident(**d)
+                except Exception:
+                    try:
+                        inc_type = IncidentType(d.get("incident_type", "Unknown"))
+                    except ValueError:
+                        inc_type = IncidentType.unknown
+                    try:
+                        sev = Severity(d.get("severity", "medium"))
+                    except ValueError:
+                        sev = Severity.medium
+                    inc = Incident(
+                        id=d.get("id", ""),
+                        title=d.get("title", ""),
+                        incident_type=inc_type,
+                        severity=sev,
+                        namespace=d.get("namespace", "default"),
+                        workload=d.get("workload", ""),
+                        pod_name=d.get("pod_name"),
+                        detected_at=d.get("detected_at", ""),
+                        raw_signals=d.get("raw_signals") or {},
+                        evidence=d.get("evidence") or [],
+                    )
+                results.append(inc)
+                if len(results) >= 5:
+                    break
+            return results
         except Exception:
             return []
 

@@ -1,0 +1,73 @@
+# Deploy the SRE log-reader agent as a single pod.
+# It reads logs from all pods in TARGET_NAMESPACES via the K8s API.
+#
+# Usage:
+#   kubectl apply -f deploy/agent/00-rbac.yaml
+#   kubectl apply -f deploy/agent/01-agent-deployment.yaml
+#
+# To point at your local operator (port-forwarded or running locally):
+#   Change OPERATOR_API_URL to http://<your-ip>:8000
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-sre-log-reader
+  namespace: ai-sre
+  labels:
+    app: ai-sre-log-reader
+    app.kubernetes.io/part-of: ai-k8s-sre-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-sre-log-reader
+  template:
+    metadata:
+      labels:
+        app: ai-sre-log-reader
+    spec:
+      serviceAccountName: ai-sre-agent
+      containers:
+        - name: log-reader
+          image: 635066855817.dkr.ecr.us-west-2.amazonaws.com/ai-sre-agent:latest
+          imagePullPolicy: Always
+          env:
+            # Point to your operator API.
+            # If running locally with port-forward:
+            #   kubectl port-forward svc/ai-sre-operator-api 8000:8000 -n ai-sre
+            # Or use the in-cluster service name:
+            - name: OPERATOR_API_URL
+              value: "http://ai-sre-operator-api.ai-sre.svc:8000"
+
+            # Namespaces to monitor — comma-separated
+            - name: TARGET_NAMESPACES
+              value: "dev,qa,default"
+
+            # How many tail lines to read per pod per cycle
+            - name: TAIL_LINES
+              value: "100"
+
+            # Seconds between report cycles
+            - name: REPORT_INTERVAL
+              value: "30"
+
+            - name: LOG_LEVEL
+              value: "INFO"
+
+            # Pods to skip (optional, comma-separated)
+            - name: EXCLUDE_PODS
+              value: ""
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+      restartPolicy: Always
